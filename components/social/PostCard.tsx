@@ -1,4 +1,5 @@
 "use client";
+import { authenticatedFetch } from "@/lib/session";
 import { useState, useRef, useEffect } from "react";
 import {
   Heart,
@@ -35,7 +36,7 @@ export default function PostCard({
   onComment: (p: Post) => void;
   onProfile: (id: string) => void;
   onWorld: (id: string) => void;
-  onCommunity:(id:string)=>void;
+  onCommunity: (id: string) => void;
   onQuote: (id: string) => void;
   onChanged: () => void;
   onNotice: (v: string) => void;
@@ -48,10 +49,17 @@ export default function PostCard({
     seen = useRef(false);
   const value = local.baseline === post ? local.value : post;
   function setValue(next: Post | ((value: Post) => Post)) {
-    setLocal({baseline:post, value:typeof next==='function'?next(value):next});
+    setLocal({
+      baseline: post,
+      value: typeof next === "function" ? next(value) : next,
+    });
   }
-  const [now,setNow]=useState(()=>Date.now());
-  useEffect(()=>{if(post.type!=='poll')return;const timer=setInterval(()=>setNow(Date.now()),30000);return()=>clearInterval(timer);},[post.type]);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (post.type !== "poll") return;
+    const timer = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(timer);
+  }, [post.type]);
   useEffect(() => {
     const element = root.current;
     const playerAtMount = video.current;
@@ -234,17 +242,20 @@ export default function PostCard({
                       return;
                     }
                     if (window.confirm("Block this creator?"))
-                      void fetch("/api/data", {
-                        method: "POST",
-                        headers: {
-                          Authorization: "Bearer " + session.access_token,
-                          "Content-Type": "application/json",
+                      void authenticatedFetch(
+                        "/api/data",
+                        session.access_token,
+                        {
+                          method: "POST",
+                          headers: {
+                            "Content-Type": "application/json",
+                          },
+                          body: JSON.stringify({
+                            action: "block",
+                            target_user: value.author_id,
+                          }),
                         },
-                        body: JSON.stringify({
-                          action: "block",
-                          target_user: value.author_id,
-                        }),
-                      })
+                      )
                         .then((r) => {
                           if (!r.ok) throw new Error("Block failed");
                           onChanged();
@@ -357,7 +368,9 @@ export default function PostCard({
         {value.community && (
           <button
             className="community-attribution"
-            onClick={()=>{if(value.community)onCommunity(value.community.id);}}
+            onClick={() => {
+              if (value.community) onCommunity(value.community.id);
+            }}
           >
             {value.community.name}
           </button>
@@ -365,7 +378,13 @@ export default function PostCard({
         {value.quoted && (
           <button
             className="quoted-post"
-            onClick={()=>void read<Post>("post",{post_id:value.quoted!.id},session).then(p=>{if(p)onComment(p);}).catch(e=>onNotice(e.message))}
+            onClick={() =>
+              void read<Post>("post", { post_id: value.quoted!.id }, session)
+                .then((p) => {
+                  if (p) onComment(p);
+                })
+                .catch((e) => onNotice(e.message))
+            }
           >
             <strong>{value.quoted.author?.display_name}</strong>
             <p>{value.quoted.title || value.quoted.body}</p>
@@ -383,8 +402,7 @@ export default function PostCard({
                   key={i}
                   className={value.vote === i ? "selected" : ""}
                   disabled={
-                    busy ||
-                    new Date(value.poll_closes_at || "").getTime() < now
+                    busy || new Date(value.poll_closes_at || "").getTime() < now
                   }
                   onClick={() => void action("vote", { option_index: i })}
                 >

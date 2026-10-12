@@ -1,4 +1,5 @@
 "use client";
+import { authenticatedFetch, clearSession } from "@/lib/session";
 import { useState, useEffect } from "react";
 import Modal from "@/components/Modal";
 import { api, type Session } from "@/lib/client";
@@ -24,7 +25,9 @@ export default function SettingsPanel({
     }),
     [error, setError] = useState("");
   useEffect(() => {
-    void Promise.resolve().then(()=>setTheme(localStorage.getItem("common.theme.v1") || "dark"));
+    void Promise.resolve().then(() =>
+      setTheme(localStorage.getItem("common.theme.v1") || "dark"),
+    );
     if (session)
       void api("/api/data?kind=settings", session.access_token)
         .then((r) => {
@@ -81,17 +84,16 @@ export default function SettingsPanel({
     )
       return;
     try {
-      const r = await fetch("/api/data", {
+      const r = await authenticatedFetch("/api/data", session.access_token, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: "Bearer " + session.access_token,
           "x-confirm-delete": "DELETE",
         },
         body: JSON.stringify({ action: "delete_account" }),
       });
       if (!r.ok) throw new Error("Account deletion failed. Try again.");
-      localStorage.removeItem("common.session.v1");
+      clearSession();
       onDeleted();
       onClose();
     } catch (e) {
