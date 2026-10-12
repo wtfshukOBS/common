@@ -1,0 +1,1 @@
+{"framework":"nextjs","buildCommand":"pnpm exec next build","outputDirectory":".next"}
