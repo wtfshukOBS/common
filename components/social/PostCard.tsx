@@ -13,6 +13,10 @@ import {
   Flag,
   Quote,
   Trash2,
+  Volume2,
+  VolumeX,
+  Play,
+  Pause,
 } from "lucide-react";
 import type { Session } from "@/lib/client";
 import { act, read, count, relative, type Post } from "@/lib/social/client";
@@ -20,6 +24,7 @@ import { Avatar, WorldIcon } from "./Shared";
 let activeVideo: HTMLVideoElement | null = null;
 export default function PostCard({
   post,
+  immersive = false,
   session,
   onAuth,
   onComment,
@@ -31,6 +36,7 @@ export default function PostCard({
   onNotice,
 }: {
   post: Post;
+  immersive?: boolean;
   session: Session | null;
   onAuth: () => void;
   onComment: (p: Post) => void;
@@ -43,7 +49,9 @@ export default function PostCard({
 }) {
   const [local, setLocal] = useState({ baseline: post, value: post }),
     [busy, setBusy] = useState(false),
-    [gallery, setGallery] = useState(0);
+    [gallery, setGallery] = useState(0),
+    [muted, setMuted] = useState(true),
+    [playing, setPlaying] = useState(false);
   const root = useRef<HTMLElement>(null),
     video = useRef<HTMLVideoElement>(null),
     seen = useRef(false);
@@ -61,12 +69,15 @@ export default function PostCard({
     return () => clearInterval(timer);
   }, [post.type]);
   useEffect(() => {
-    const element = root.current;
+    const element = immersive ? root.current : video.current || root.current;
     const playerAtMount = video.current;
     if (!element) return;
     const observer = new IntersectionObserver(
       (entries) => {
-        const visible = entries[0].isIntersecting;
+        const visible =
+          document.visibilityState === "visible" &&
+          entries[0].isIntersecting &&
+          entries[0].intersectionRatio >= (immersive ? 0.7 : 0.45);
         if (visible && !seen.current && session) {
           seen.current = true;
           void act("impression", { post_id: post.id }, session).catch(() => {});
@@ -83,14 +94,24 @@ export default function PostCard({
           } else player.pause();
         }
       },
-      { threshold: 0.65 },
+      { threshold: immersive ? 0.7 : 0.45 },
     );
     observer.observe(element);
+    const visibility = () => {
+      if (document.visibilityState !== "visible") video.current?.pause();
+      else {
+        observer.unobserve(element);
+        observer.observe(element);
+      }
+    };
+    document.addEventListener("visibilitychange", visibility);
     return () => {
       observer.disconnect();
+      document.removeEventListener("visibilitychange", visibility);
+      playerAtMount?.pause();
       if (playerAtMount && activeVideo === playerAtMount) activeVideo = null;
     };
-  }, [post.id, session]);
+  }, [post.id, session, immersive]);
   async function action(name: string, extra: Record<string, unknown> = {}) {
     if (!session) {
       onAuth();
@@ -142,7 +163,12 @@ export default function PostCard({
   const images = value.media.filter((m) => m.kind === "image"),
     clip = value.media.find((m) => m.kind === "video");
   return (
-    <article ref={root} className={"post-card " + value.type}>
+    <article
+      ref={root}
+      className={
+        "post-card " + value.type + (immersive ? " immersive-post" : "")
+      }
+    >
       <header>
         <button
           className="post-author"
@@ -286,75 +312,6 @@ export default function PostCard({
           ))}
         </div>
       )}
-      {clip && (
-        <div className="post-video">
-          <video
-            ref={video}
-            src={clip.path_url}
-            poster={images[0]?.path_url}
-            muted
-            playsInline
-            controls
-            loop
-            preload="metadata"
-            onPlay={(e) => {
-              if (activeVideo && activeVideo !== e.currentTarget)
-                activeVideo.pause();
-              activeVideo = e.currentTarget;
-            }}
-            onPause={(e) => {
-              if (session && e.currentTarget.currentTime > 0)
-                void act(
-                  "impression",
-                  {
-                    post_id: value.id,
-                    watch_seconds: Math.min(180, e.currentTarget.currentTime),
-                  },
-                  session,
-                ).catch(() => {});
-            }}
-            onError={() =>
-              onNotice(
-                "This video did not load. Refresh the feed to try again.",
-              )
-            }
-          />
-          <span className="video-views">
-            <Eye size={12} />
-            {count(value.views)} views
-          </span>
-        </div>
-      )}
-      {value.type !== "video" && images.length > 0 && (
-        <div className="post-gallery">
-          <img
-            src={images[gallery]?.path_url}
-            alt={images[gallery]?.alt || value.title || "Post image"}
-            loading="lazy"
-          />
-          {images.length > 1 && (
-            <div>
-              <button
-                onClick={() =>
-                  setGallery((gallery - 1 + images.length) % images.length)
-                }
-                aria-label="Previous image"
-              >
-                ‹
-              </button>
-              <span>
-                {gallery + 1}/{images.length}
-              </span>
-              <button
-                onClick={() => setGallery((gallery + 1) % images.length)}
-                aria-label="Next image"
-              >
-                ›
-              </button>
-            </div>
-          )}
-        </div>
-      )}
       <div className="post-copy">
         {value.title && <h3>{value.title}</h3>}
         {value.body && <p>{value.body}</p>}
@@ -419,6 +376,99 @@ export default function PostCard({
           </div>
         )}
       </div>
+      {clip && (
+        <div className="post-video">
+          <video
+            ref={video}
+            src={clip.path_url}
+            poster={images[0]?.path_url}
+            muted={muted}
+            playsInline
+            controls={!immersive}
+            loop
+            preload="metadata"
+            onPlay={(e) => {
+              setPlaying(true);
+              if (activeVideo && activeVideo !== e.currentTarget)
+                activeVideo.pause();
+              activeVideo = e.currentTarget;
+            }}
+            onPause={(e) => {
+              setPlaying(false);
+              if (session && e.currentTarget.currentTime > 0)
+                void act(
+                  "impression",
+                  {
+                    post_id: value.id,
+                    watch_seconds: Math.min(180, e.currentTarget.currentTime),
+                  },
+                  session,
+                ).catch(() => {});
+            }}
+            onError={() =>
+              onNotice(
+                "This video did not load. Refresh the feed to try again.",
+              )
+            }
+          />
+          {immersive && (
+            <div className="short-controls">
+              <button
+                aria-label={playing ? "Pause video" : "Play video"}
+                onClick={() => {
+                  const player = video.current;
+                  if (player) {
+                    if (player.paused) void player.play().catch(() => {});
+                    else player.pause();
+                  }
+                }}
+              >
+                {playing ? <Pause size={20} /> : <Play size={20} />}
+              </button>
+              <button
+                aria-label={muted ? "Unmute video" : "Mute video"}
+                onClick={() => setMuted(!muted)}
+              >
+                {muted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+              </button>
+            </div>
+          )}
+          <span className="video-views">
+            <Eye size={12} />
+            {count(value.views)} views
+          </span>
+        </div>
+      )}
+      {value.type !== "video" && images.length > 0 && (
+        <div className="post-gallery">
+          <img
+            src={images[gallery]?.path_url}
+            alt={images[gallery]?.alt || value.title || "Post image"}
+            loading="lazy"
+          />
+          {images.length > 1 && (
+            <div>
+              <button
+                onClick={() =>
+                  setGallery((gallery - 1 + images.length) % images.length)
+                }
+                aria-label="Previous image"
+              >
+                ‹
+              </button>
+              <span>
+                {gallery + 1}/{images.length}
+              </span>
+              <button
+                onClick={() => setGallery((gallery + 1) % images.length)}
+                aria-label="Next image"
+              >
+                ›
+              </button>
+            </div>
+          )}
+        </div>
+      )}
       <footer className="post-interactions">
         <button
           className={value.liked ? "liked" : ""}

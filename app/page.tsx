@@ -36,6 +36,7 @@ import Room from "@/components/Room";
 import Composer from "@/components/social/Composer";
 import WorldEditor from "@/components/social/WorldEditor";
 import CommunityEditor from "@/components/social/CommunityEditor";
+import FeedContinuation from "@/components/social/FeedContinuation";
 import PostCard from "@/components/social/PostCard";
 import Comments from "@/components/social/Comments";
 import Inbox from "@/components/social/Inbox";
@@ -322,6 +323,7 @@ export default function Common() {
         return;
       const requestId = ++feedSequence.current;
       setLoading(true);
+      if (!more) setPosts([]);
       try {
         const selectedTab =
           page === "Saved"
@@ -598,7 +600,7 @@ export default function Common() {
       (worldId && m.world_id === worldId),
   );
   function postList() {
-    return loading ? (
+    return loading && !posts.length ? (
       <div className="social-skeletons">
         {[1, 2, 3].map((i) => (
           <div key={i} />
@@ -609,12 +611,41 @@ export default function Common() {
         <div
           className={
             "social-feed " +
-            (page === "Profile" && creator?.layout === "list" ? "list" : "")
+            (tab === "Videos"
+              ? "video-feed"
+              : page === "Profile" && creator?.layout !== "list"
+                ? ""
+                : "timeline-feed")
           }
+          role={tab === "Videos" ? "region" : undefined}
+          aria-label={
+            tab === "Videos"
+              ? "Short video feed. Scroll or use arrow keys for the next video."
+              : "Post timeline"
+          }
+          tabIndex={tab === "Videos" ? 0 : undefined}
+          onKeyDown={(e) => {
+            if (
+              tab !== "Videos" ||
+              e.target !== e.currentTarget ||
+              !["ArrowDown", "ArrowUp"].includes(e.key)
+            )
+              return;
+            e.preventDefault();
+            e.currentTarget.scrollBy({
+              top:
+                (e.key === "ArrowDown" ? 1 : -1) * e.currentTarget.clientHeight,
+              behavior: window.matchMedia("(prefers-reduced-motion: reduce)")
+                .matches
+                ? "instant"
+                : "smooth",
+            });
+          }}
         >
           {posts.map((p) => (
             <PostCard
               post={p}
+              immersive={tab === "Videos"}
               session={session}
               key={p.id}
               onAuth={() => setModal("auth")}
@@ -627,29 +658,31 @@ export default function Common() {
               onNotice={alert}
             />
           ))}
+          <FeedContinuation
+            loading={loading}
+            hasMore={!!cursor}
+            disabled={!!error}
+            onLoad={() => (cursor ? loadFeed(true, cursor) : Promise.resolve())}
+          />
         </div>
-        {cursor && (
-          <button
-            className="secondary load-more"
-            onClick={() => void loadFeed(true, cursor)}
-          >
-            Load more posts
-          </button>
-        )}
       </>
     ) : (
       <Empty
         title={
           query
             ? "No posts match your search."
-            : activeWorld
-              ? "Your World starts with you."
-              : "Make the first post worth coming back for."
+            : tab === "Videos"
+              ? "No videos here yet."
+              : activeWorld
+                ? "Your World starts with you."
+                : "Make the first post worth coming back for."
         }
         text={
-          activeWorld?.kind === "personal"
-            ? "Follow creators or broaden your topics to fill this feed."
-            : "Share a clip, a photo, a thought. Keep it original."
+          tab === "Videos"
+            ? "Share a short video. Scroll or swipe to move between clips as they arrive."
+            : activeWorld?.kind === "personal"
+              ? "Follow creators or broaden your topics to fill this feed."
+              : "Share a clip, a photo, a thought. Keep it original."
         }
         action={() => createPost()}
         label="Create a post"
@@ -1000,6 +1033,7 @@ export default function Common() {
         <div
           className={
             "social-content " +
+            (tab === "Videos" ? "shorts-mode " : "") +
             (["Inbox", "Events"].includes(page) || room ? "wide-content" : "")
           }
         >
