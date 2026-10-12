@@ -1,79 +1,51 @@
-# Common
+# Common 3.0
 
-Your place to be, together.
+Common combines creator posts, personal and public Worlds, communities, and private conversations. This upgrades the existing Common application and preserves its accounts, Moments, participation, rooms, connections, notifications, and settings. Moments now appear as Events.
 
-Common centers on shared activities: find a Moment, join people, share an experience, connect, and meet again.
+## Implemented
 
-## First release
+- Responsive navy, purple, and pink feed, World covers, creator profiles, and mobile navigation.
+- Video, image, text, and poll posts with one canonical record shared across Worlds.
+- Likes, threaded comments, reposts, quotes, private saves, sharing, follows, and real view/watch measurements.
+- Personal/private Worlds, public Worlds, topic and format preferences, member roles, invitations, approval queues, and World moderation.
+- Communities with memberships, associated Worlds, and posts.
+- Private direct and group conversations with Realtime updates, older messages, editing, deletion, mute settings, messaging preferences, and optional read receipts.
+- Profiles with avatar/banner uploads, bio, links, pinned posts, and featured owned Worlds.
+- Creator statistics calculated from real records, search, onboarding, and privacy/personalization controls.
+- Existing adult signup, email confirmation handling, Events, room chat, saves, feedback, exports, blocking, reporting, and account deletion.
 
-Implemented with real Supabase records, not seeded activity:
+No sample users, posts, or engagement counts are inserted. Empty states reflect the actual database.
 
-- Email/password authentication, email confirmation handling, session refresh and sign-out.
-- Adults-only registration enforced by a database trigger, plus server validation. This relies on declared birth dates, not independent age verification.
-- Profiles, interests, language and group-size onboarding.
-- Responsive navigation, dark/light/system themes and saved preferences.
-- Moment creation, immediate starts, scheduled starts, and bounded weekly series.
-- Private/public visibility, join approval, atomic capacity limits, joins and leaving.
-- Private cover uploads with PNG/JPEG/WebP checks, a 5 MB size limit and signed URLs.
-- Participant lists, host announcements, invitations, request approvals, removal, cancellation and completion.
-- Supabase Realtime room chat, reconnect reloads and older-message pagination.
-- Post-Moment recap, private feedback, private saves and mutual connection requests.
-- Notifications, blocking, reports, personal exports and permanent account deletion.
-- Row-level security, explicit grants, foreign-key indexes and database-enforced authorization.
+## Media and remaining work
 
-Not implemented in this release: direct conversations, full communities, mutual Shared History consent and memories, custom profile widgets, moderator/admin review UI, analytics, email reminders, custom avatars/banners, availability preference editing, editing existing Moments, storage usage quotas, automated retention, independent age verification, or built-in voice/video. Messages and Communities explain that they are later releases. Reports currently require review in Supabase by an authorized operator. This is a foundation release, not completion of the full 22-section product brief.
+Images are checked as PNG/JPEG/WebP. Videos use validated MP4 uploads, a 100 MB limit, and a three-minute duration limit. Direct signed uploads avoid proxying large files through Vercel. Server validation issues an HMAC receipt before media becomes eligible for a post. Storage remains private and authorized reads receive temporary signed URLs.
 
-## Stack and hosting
+Playback currently uses progressive MP4 and a client-generated thumbnail. Adaptive streaming, transcoding, automated content review, and production retention/abandoned-upload cleanup require a separate media pipeline. Creator analytics include views and watch seconds, not a full retention curve. Reports require an authorized operator for platform-wide review. SMTP delivery, signup confirmation, authenticated browser flows, and reconnect behavior still require end-to-end acceptance testing. Registration validates declared age, not independently verified age.
 
-React 19, TypeScript, Next.js App Router-compatible routes, Tailwind CSS, Lucide, Zod and Supabase Auth/Postgres/Realtime/Storage. The hosted ChatGPT Site uses Vinext's compatible runtime on Cloudflare Workers. `vercel.json` builds the same application with standard Next.js for Vercel. The GitHub distribution uses ordinary `next dev`, `next build`, and `next start` scripts.
-
-No service-role key is required or exposed. Browser tokens are stored locally and validated by Supabase on every protected server request. Do not add arbitrary HTML or JavaScript rendering.
-
-## Local setup
+## Setup
 
 Use Node 24 and pnpm 11.25.0.
 
-1. Install dependencies: `pnpm install --frozen-lockfile`.
-2. Copy `.env.example` to `.env.local` and supply your project URL and publishable key.
-3. Apply the SQL files in `supabase/migrations` in filename order to a dedicated Supabase project. These migrations have already been applied to `poukmhlzuwulxzcftami`; do not run them twice there.
-4. Start development: `pnpm dev`. For the Sites checkout, the supplied runtime scripts launch Vinext instead of Next.js.
-5. Create an account, verify your email if required, complete your profile, and create a Moment.
+1. Run `pnpm install --frozen-lockfile`.
+2. Copy `.env.example` to `.env.local` and configure the Supabase URL and publishable key. Never use a service-role key in the browser.
+3. Apply migrations in filename order to a dedicated project. They are already applied to the connected Common project and must not be run twice there.
+4. Configure a random server-only `MEDIA_VALIDATION_SECRET` in the runtime and provision the same secret in `private.media_validation_secret` through a trusted administrator connection. Never commit the value or expose it in a public environment variable.
+5. Run `pnpm dev` or `pnpm build` followed by `pnpm start`.
 
-Environment variables:
+For Supabase Auth, configure the deployed origin and permitted callback URLs. Set up SMTP, confirmation delivery, and rate limits before public launch. Leaked-password protection is currently disabled in the connected project.
 
-- `SUPABASE_URL`: Supabase project URL.
-- `SUPABASE_PUBLISHABLE_KEY`: public publishable API key. Never substitute a service-role key.
+## Deployment
 
-## Authentication configuration
+The existing GitHub repository is linked to Vercel at https://common-liard.vercel.app/. Main commits trigger production builds. `vercel.json` uses Next.js and `.next`. Production has `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and the server-only media validation secret.
 
-In Supabase Authentication URL Configuration, set Site URL to your deployed Common origin and add it to the redirect allowlist. Add localhost for local development if needed. Keep email confirmation enabled. Configure SMTP and CAPTCHA/rate limits before inviting public signups. The signup trigger requires `birthdate` metadata and rejects minors and anonymous users. Existing adult registration does not establish verified identity or age.
+## Architecture and verification
 
-## Vercel
+`app/page.tsx` and `components/social` implement the social interface. `/api/social` handles validated reads and actions. `/api/media` coordinates signed uploads and checks uploaded bytes. Existing `/api/auth`, `/api/data`, and `/api/upload` continue to support accounts and Events.
 
-Import `wtfshukOBS/common`, select Next.js, use repository root, and set the two environment variables above in the desired environments. `vercel.json` runs `pnpm exec next build` and uses `.next`. The supplied ChatGPT Site deployment is separate from Vercel. No Vercel project or deployment has been provisioned by this release.
+Public RPC wrappers use caller privileges. Private implementations enforce identity, ownership, visibility, membership, and moderation roles. RLS protects private preferences, saves, conversations, and media records. The secret table has no client-access policy.
 
-## Architecture
+Run `pnpm test`, `pnpm typecheck`, `pnpm lint`, and `pnpm build`. The SQL fixtures in `tests/database.integration.sql` and `tests/social.integration.sql` run in a transaction and roll back. They cover Event authorization/capacity plus World visibility, feed preferences, canonical counts, approval queues, private saves, DM membership, blocking, and analytics. All 11 unit tests, type checking, lint, build, and database fixtures passed before publication.
 
-- `app/page.tsx`: responsive application shell, feeds, profile, connections, and settings.
-- `components/`: accessible native-dialog forms and the Moment room.
-- `app/api/auth`: authenticated Supabase auth gateway.
-- `app/api/data`: whitelisted, validated REST and RPC operations.
-- `app/api/upload`: authenticated image uploads.
-- `lib/validation.ts`: shared input validation.
-- `supabase/migrations`: normalized tables, RLS, grants, private privileged implementations and caller-privileged public RPC wrappers.
+The disposable HTTP login fixture failed in Supabase Auth with `Database error querying schema`. This did not alter the real member account. Consequently the combined authenticated upload/playback test has not been completed. The fixture was removed and the preexisting profile and Event counts were preserved.
 
-Public RPC wrappers run with caller privileges. Private privileged functions validate identity and authorization explicitly. Capacity allocation locks the Moment row before checking or inserting participants. Rate-check triggers serialize creation and chat sends per user. Private covers require an authorized storage read before receiving a temporary signed URL.
-
-## Verification
-
-- `pnpm exec tsc --noEmit`
-- `pnpm exec eslint app components lib`
-- `node --test tests/validation.test.mjs`
-- Execute `tests/database.integration.sql` through a trusted SQL connection. It uses temporary fixtures and rolls back all changes.
-- `tests/live-check.mjs` takes JSON configuration on stdin for disposable confirmed test users. It checks login, real REST joins, a simultaneous last-space join race, room messaging, anonymous access, and cross-user privacy, then deletes the users through the account lifecycle RPC. Create fixtures in a dedicated test project when rerunning it. Do not supply real member credentials.
-
-Database checks passed against the connected Common project, including concurrent SQL transactions competing for the last participant space. Type checking, linting, unit validation, and builds are checked before publication. Browser QA was unavailable in this execution environment. HTTP login with synthetic SQL fixtures was not completed. Browser login, email-delivery/confirmation, upload rendering, and Realtime reconnect behavior still need manual end-to-end verification. Public launch requires the remaining moderation and operational work above.
-
-## Deletion and retention
-
-Account deletion revokes sessions and deletes the account, hosted Moments and associated records through foreign-key cascades. Uploaded storage objects need an operational cleanup policy for abandoned uploads and deleted accounts. Signed image URLs last up to one hour. There is no automatic retention schedule in this release.
+Account deletion cascades through application records. Storage object cleanup for deleted accounts and abandoned uploads still needs an operational job. Signed media links expire after an hour.

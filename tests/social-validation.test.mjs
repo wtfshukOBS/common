@@ -1,0 +1,10 @@
+import test from'node:test';
+import assert from'node:assert/strict';
+import{worldSchema,postSchema,normalizeMix}from'../lib/social/validation.ts';
+import{identifyImage,mp4Duration}from'../lib/social/media.ts';
+import{readFileSync}from'node:fs';
+test('World content preferences normalize without treating them as strict quotas',()=>{assert.deepEqual(normalizeMix({video:30,image:25,text:25,community:20}),{video:.3,image:.25,text:.25,community:.2});assert.deepEqual(normalizeMix({video:2,image:2}),{video:.5,image:.5});assert.throws(()=>normalizeMix({video:0,image:0}));});
+test('Private post distribution and invalid upload IDs are rejected',()=>{const post={type:'text',title:'',body:'Hello World',topics:['Gaming'],visibility:'public',world_ids:[],media:[]};assert.equal(postSchema.safeParse(post).success,true);assert.equal(postSchema.safeParse({...post,visibility:'private',world_ids:['00000000-0000-4000-8000-000000000001']}).success,false);assert.equal(postSchema.safeParse({...post,media:[{id:'someone-else',alt:''}]}).success,false);});
+test('World editor rejects arbitrary cover URLs and excessive topics',()=>{const world={name:'My World',description:'',kind:'personal',visibility:'private',category:'Gaming',topics:['Gaming'],cover:'world-gaming',icon:'gamepad',content_mix:{video:30,image:25,text:25,community:20},contribution:'members',rules:''};assert.equal(worldSchema.safeParse(world).success,true);assert.equal(worldSchema.safeParse({...world,cover:'https://tracker.invalid/cover'}).success,false);assert.equal(worldSchema.safeParse({...world,topics:['1','2','3','4','5','6']}).success,false);});
+test('Media sniffing rejects mismatched image content',()=>{assert.equal(identifyImage(new Uint8Array([137,80,78,71,13,10]),'image/png'),true);assert.equal(identifyImage(new TextEncoder().encode('<svg onload="alert(1)">'),'image/png'),false);});
+test('MP4 duration extraction rejects malformed atoms',()=>{const data=new Uint8Array(48),v=new DataView(data.buffer);v.setUint32(0,40);data.set([109,118,104,100],4);v.setUint32(20,1000);v.setUint32(24,2000);assert.equal(mp4Duration(data),2);v.setUint32(0,9999);assert.equal(mp4Duration(data),null);});

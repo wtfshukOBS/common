@@ -1,38 +1,2073 @@
-'use client';
-import {useState,useEffect,useCallback,useMemo} from 'react';
-import {Home,Compass,CalendarDays,Users,MessageCircle,Shapes,User,Settings,Plus,Search,Bell,ArrowUpRight,ArrowRight,Gamepad2,Film,Palette,Music,Coffee,Heart,Bookmark,ChevronRight,Sun,Moon,LogOut,SlidersHorizontal,Check,Shield,Download,Menu} from 'lucide-react';
-import Auth from '@/components/Auth';
-import CreateMoment from '@/components/CreateMoment';
-import ProfileEditor from '@/components/ProfileEditor';
-import Room from '@/components/Room';
-import {api,dateLabel,coverSource,type Session,type Profile,type Moment,type Person} from '@/lib/client';
-import {categories} from '@/lib/validation';
-const nav=[{name:'Home',icon:Home},{name:'Explore',icon:Compass},{name:'Moments',icon:CalendarDays},{name:'Connections',icon:Users},{name:'Messages',icon:MessageCircle},{name:'Communities',icon:Shapes},{name:'Profile',icon:User},{name:'Settings',icon:Settings}];
-const ideas=[{category:'Gaming',cover:'gaming',title:'One more round, together.',text:'Co-op sessions. New teammates. Good company.',icon:Gamepad2},{category:'Movies',cover:'movies',title:'A movie. A few new faces.',text:'Watch something worth talking about.',icon:Film},{category:'Art',cover:'art',title:'Make something with someone.',text:'Draw, share ideas, and see where they go.',icon:Palette}];
-type Connection={id:string;status:string;sender_id:string;recipient_id:string;sender:Person;recipient:Person};
-type Notification={id:string;title:string;moment_id:string|null;read_at:string|null;created_at:string};
-function Empty({icon:Icon=CalendarDays,title,text,action,label='Create a Moment'}:{icon?:typeof CalendarDays;title:string;text:string;action?:()=>void;label?:string}){return <div className="empty"><span className="orb"><Icon size={25}/></span><h3>{title}</h3><p>{text}</p>{action&&<button className="secondary" onClick={action}>{label}<ArrowRight size={15}/></button>}</div>}
-function Card({m,uid,saved,onOpen,onSave}:{m:Moment;uid?:string;saved:boolean;onOpen:()=>void;onSave:()=>void}){return <article className="moment-card"><button className="card-image" onClick={onOpen} aria-label={'View '+m.title}><img src={coverSource(m)} alt="" loading="lazy"/><span className={'status '+m.status}>{m.status==='live'&&<i/>}{m.status}</span><span className="capacity"><Users size={12}/>{m.participants.length}/{m.capacity}</span></button><div className="card-body"><button className="card-title" onClick={onOpen}>{m.title}</button><p className="card-date">{m.status==='live'?'Happening now':dateLabel(m.start_at)}</p><div className="chips"><span>{m.category}</span><span>{m.voice==='text'?'Text chat':'Voice '+m.voice}</span></div><div className="card-footer"><div className="host-mini"><span className="avatar small">{m.host?.display_name?.slice(0,1)||'?'}</span><span>{m.host?.display_name||'Host'}</span></div><button className={'icon-button '+(saved?'saved':'')} aria-label={saved?'Unsave Moment':'Save Moment'} onClick={onSave}><Bookmark size={17} fill={saved?'currentColor':'none'}/></button></div><button className="primary card-join" onClick={onOpen}>{m.participants.some(p=>p.user_id===uid)?'Open room':m.approval_required?'View & request':'View Moment'}<ArrowUpRight size={15}/></button></div></article>}
-export default function Common(){const [page,setPage]=useState('Home'),[tab,setTab]=useState('For You'),[category,setCategory]=useState('All'),[query,setQuery]=useState(''),[session,setSession]=useState<Session|null>(null),[profile,setProfile]=useState<Profile|null>(null),[configured,setConfigured]=useState(false),[moments,setMoments]=useState<Moment[]>([]),[saved,setSaved]=useState<string[]>([]),[connections,setConnections]=useState<Connection[]>([]),[notifications,setNotifications]=useState<Notification[]>([]),[notificationOpen,setNotificationOpen]=useState(false),[modal,setModal]=useState<'auth'|'create'|'profile'|null>(null),[initialCategory,setInitialCategory]=useState('Gaming'),[room,setRoom]=useState<string|null>(null),[loading,setLoading]=useState(true),[error,setError]=useState(''),[notice,setNotice]=useState(''),[theme,setTheme]=useState('system'),[settings,setSettings]=useState({personalization:true,read_receipts:false,notifications_enabled:true}),[mobileOpen,setMobileOpen]=useState(false),[sort,setSort]=useState('recommended'),[offset,setOffset]=useState(0),[hasMore,setHasMore]=useState(false);
-const keepSession=useCallback((s:Session)=>{const normalized={...s,expires_at:s.expires_at||Math.floor(Date.now()/1000)+(s.expires_in||3600)};setSession(normalized);localStorage.setItem('common.session.v1',JSON.stringify(normalized));},[]);
-useEffect(()=>{void api('/api/config').then(c=>setConfigured(c.configured)).catch(()=>setError('Unable to check account availability.'));const stored=localStorage.getItem('common.session.v1');if(stored){try{const s=JSON.parse(stored);if(s.access_token&&s.refresh_token)setSession(s);}catch{localStorage.removeItem('common.session.v1');}}setTheme(localStorage.getItem('common.theme.v1')||'system');setLoading(false);},[]);
-useEffect(()=>{const media=window.matchMedia('(prefers-color-scheme: light)');const apply=()=>{document.documentElement.dataset.theme=theme==='system'?(media.matches?'light':'dark'):theme;};apply();media.addEventListener('change',apply);localStorage.setItem('common.theme.v1',theme);return()=>media.removeEventListener('change',apply);},[theme]);
-useEffect(()=>{if(!session)return;const refresh=async()=>{try{const s=await api('/api/auth',undefined,{action:'refresh',refresh_token:session.refresh_token});keepSession(s);}catch{localStorage.removeItem('common.session.v1');setSession(null);setProfile(null);setMoments([]);setError('Your session ended. Sign in again.');}};const delay=Math.max(0,((session.expires_at||0)*1000-Date.now()-60000));const timer=window.setTimeout(()=>void refresh(),delay);return()=>window.clearTimeout(timer);},[session,keepSession]);
-const load=useCallback(async()=>{if(!session)return;setLoading(true);try{const [p,m,s,c,n,prefs]=await Promise.all(['profile','moments','saved','connections','notifications','settings'].map(kind=>api('/api/data?kind='+kind,session.access_token)));setProfile(p.items[0]||null);setMoments(m.items);setSaved(s.items.map((v:{moment_id:string})=>v.moment_id));setConnections(c.items);setNotifications(n.items);setHasMore(m.items.length===24);setOffset(0);if(prefs.items[0]){setSettings(prefs.items[0]);setTheme(prefs.items[0].theme);}if(p.items[0]&&!p.items[0].onboarded)setModal('profile');setError('');}catch(e){setError((e as Error).message);}finally{setLoading(false);}},[session]);
-useEffect(()=>{void load();},[load]);
-useEffect(()=>{if(!notice)return;const timer=setTimeout(()=>setNotice(''),4000);return()=>clearTimeout(timer);},[notice]);
-useEffect(()=>{if(!session||!configured)return;let stop=()=>{},cancelled=false;void(async()=>{const c=await api('/api/config');const {createClient}=await import('@supabase/supabase-js');if(cancelled)return;const client=createClient(c.url,c.key,{auth:{persistSession:false,autoRefreshToken:false}});await client.realtime.setAuth(session.access_token);const ch=client.channel('notifications-'+session.user.id).on('postgres_changes',{event:'*',schema:'public',table:'notifications',filter:'user_id=eq.'+session.user.id},()=>{void api('/api/data?kind=notifications',session.access_token).then(r=>setNotifications(r.items));}).subscribe();stop=()=>{void client.removeChannel(ch);};})().catch(()=>{});return()=>{cancelled=true;stop();};},[session,configured]);
-function navigate(p:string){setPage(p);setRoom(null);setMobileOpen(false);setQuery('');setCategory('All');}
-function create(c='Gaming'){setInitialCategory(c);if(!session){setModal('auth');return;}if(!profile?.onboarded){setModal('profile');return;}setModal('create');}
-function open(m:Moment|string){if(!session){setModal('auth');return;}setRoom(typeof m==='string'?m:m.id);setPage('Moments');}
-async function action(action:string,extra:Record<string,unknown>={}){if(!session){setModal('auth');return;}try{const r=await api('/api/data',session.access_token,{action,...extra});setNotice(typeof r.result==='string'?r.result:'Saved');await load();}catch(e){setError((e as Error).message);}}
-async function updateSettings(key:string,value:unknown){if(key==='theme')setTheme(String(value));else setSettings(v=>({...v,[key]:value}));if(session)try{await api('/api/data',session.access_token,{action:'settings',settings:{[key]:value}});setNotice('Preferences saved');}catch(e){setError((e as Error).message);}}
-async function logout(){if(session){try{await api('/api/auth',session.access_token,{action:'logout'});}catch(e){setError((e as Error).message);return;}}localStorage.removeItem('common.session.v1');setSession(null);setProfile(null);setMoments([]);setSaved([]);setConnections([]);setNotifications([]);setRoom(null);navigate('Home');}
-async function deleteAccount(){if(!session||window.prompt('This permanently deletes your Common account, hosted Moments, and messages. Type DELETE to continue.')!=='DELETE')return;try{const r=await fetch('/api/data',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token,'x-confirm-delete':'DELETE'},body:JSON.stringify({action:'delete_account'})});if(!r.ok){const d=await r.json() as {error:string};throw new Error(d.error);}localStorage.removeItem('common.session.v1');setSession(null);setProfile(null);setMoments([]);setConnections([]);setSaved([]);setNotifications([]);navigate('Home');setNotice('Your account has been deleted.');}catch(e){setError((e as Error).message);}}
-async function exportData(){if(!session)return;try{const data=await api('/api/data',session.access_token,{action:'export'});const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='common-personal-data.json';a.click();URL.revokeObjectURL(url);}catch(e){setError((e as Error).message);}}
-async function more(){if(!session)return;try{const r=await api('/api/data?kind=moments&page='+(offset+1),session.access_token);setMoments(v=>[...v,...r.items]);setOffset(v=>v+1);setHasMore(r.items.length===24);}catch(e){setError((e as Error).message);}}
-const friendIds=useMemo(()=>new Set(connections.filter(c=>c.status==='accepted').map(c=>c.sender_id===session?.user.id?c.recipient_id:c.sender_id)),[connections,session?.user.id]);
-const filtered=useMemo(()=>{let list=moments.filter(m=>(page==='Moments'?m.host_id===session?.user.id||m.participants.some(p=>p.user_id===session?.user.id)||saved.includes(m.id):!['draft','completed','cancelled'].includes(m.status))&&(category==='All'||m.category===category)&&(!query||[m.title,m.description,m.category,...m.tags].join(' ').toLowerCase().includes(query.toLowerCase()))&&(tab!=='Live Now'||m.status==='live')&&(tab!=='Friends'||friendIds.has(m.host_id)));if(sort==='recommended'&&settings.personalization&&profile)list=[...list].sort((a,b)=>{const score=(m:Moment)=>(profile.interests.includes(m.category)?5:0)+(m.language===profile.language?2:0)+(profile.group_size==='small'&&m.capacity<=6?2:0)+(friendIds.has(m.host_id)?3:0);return score(b)-score(a);});return list;},[moments,page,session?.user.id,saved,category,query,tab,friendIds,sort,profile,settings.personalization]);
-const upcoming=moments.filter(m=>m.status==='scheduled'&&m.participants.some(p=>p.user_id===session?.user.id)).slice(0,3),unread=notifications.filter(n=>!n.read_at).length;
-const displayName=profile?.display_name||'Your space';
-return <div className="app-shell"><a className="skip-link" href="#main">Skip to content</a><aside className={'sidebar '+(mobileOpen?'mobile-open':'')}><button className="brand" onClick={()=>navigate('Home')}>common<span>.</span></button><span className="sidebar-caption">A LITTLE MORE TOGETHER</span><nav aria-label="Main navigation">{nav.map(({name,icon:Icon})=><button key={name} className={page===name?'active':''} onClick={()=>navigate(name)}><Icon size={19}/><span>{name}</span>{name==='Connections'&&connections.some(c=>c.status==='pending'&&c.recipient_id===session?.user.id)&&<i/>}</button>)}</nav><button className="primary create-nav" onClick={()=>create()}><Plus size={19}/>Create Moment</button><div className="sidebar-note"><span className="mini-spark">✳</span><p>Good things happen<br/>when you show up.</p></div><footer><button className="user-button" onClick={()=>session?navigate('Profile'):setModal('auth')}><span className="avatar">{profile?.display_name?.slice(0,1)||<User size={19}/>}</span><div><strong>{session?displayName:'Make yourself at home'}</strong><small>{session?'@'+(profile?.username||'new_member'):'Join Common'}</small></div><ChevronRight size={16}/></button></footer></aside><div className="workspace"><header className="topbar"><button className="icon-button mobile-menu" aria-label="Toggle navigation" onClick={()=>setMobileOpen(v=>!v)}><Menu size={20}/></button><label className="search"><Search size={17}/><input aria-label="Search Moments" placeholder="Find your next Moment…" value={query} onChange={e=>{setQuery(e.target.value);if(!['Home','Explore','Moments'].includes(page))navigate('Explore');}}/><kbd>/</kbd></label><div className="topbar-actions"><span className="welcome-tiny">Your place to be, together.</span><button className="icon-button" aria-label="Switch colour theme" onClick={()=>void updateSettings('theme',theme==='light'?'dark':'light')}>{theme==='light'?<Moon size={19}/>:<Sun size={19}/>}</button><div className="notification-wrapper"><button className="icon-button" aria-label="Notifications" onClick={()=>session?setNotificationOpen(v=>!v):setModal('auth')}><Bell size={19}/>{unread>0&&<i className="notification-dot"/>}</button>{notificationOpen&&<div className="notification-menu"><header><h3>Notifications</h3><button className="text-button" onClick={()=>void action('read_notifications')}>Mark all read</button></header>{notifications.length===0?<p className="hint">You’re all caught up.</p>:notifications.map(n=><button className={n.read_at?'':'unread'} key={n.id} onClick={()=>{if(n.moment_id)open(n.moment_id);setNotificationOpen(false);}}><strong>{n.title}</strong><small>{dateLabel(n.created_at)}</small></button>)}</div>}</div><button className={session?'avatar top-avatar':'secondary small'} onClick={()=>session?navigate('Profile'):setModal('auth')}>{session?displayName.slice(0,1):'Join Common'}</button></div></header><div className={'content-layout '+(room?'room-layout':'')}><main id="main">{error&&<div className="error-banner" role="alert"><p>{error}</p><button className="text-button" onClick={()=>{setError('');void load();}}>Retry</button></div>}{room&&session?<Room id={room} session={session} onBack={()=>setRoom(null)} onChanged={()=>void load()} onNotice={setNotice}/>:<><div className="page-heading"><div><p className="eyebrow">{page==='Home'?'LESS SCROLLING. MORE TOGETHER.':page==='Explore'?'FIND SOMETHING IN COMMON':'YOUR PLACE TO BE'}</p><h1>{page==='Home'?'What’s happening?':page==='Explore'?'Find your next thing.':page==='Moments'?'Your Moments':page==='Profile'?displayName:page}</h1><p>{page==='Home'?'Find people. Do things. Build real connections.':page==='Explore'?'Something you love. Someone new to share it with.':page==='Moments'?'The plans you’ve made, and the ones worth keeping.':page==='Connections'?'People you’ve met. People you’ll meet again.':page==='Settings'?'Make Common feel like you.':'A little more time with your people.'}</p></div>{['Home','Explore','Moments'].includes(page)&&<button className="secondary heading-create" onClick={()=>create()}><Plus size={17}/>Create Moment</button>}</div>{['Home','Explore','Moments'].includes(page)?<><div className="feed-controls"><div className="tabs" role="tablist" aria-label="Moment feed">{['For You','Live Now','Friends','Explore'].map(t=><button role="tab" aria-selected={tab===t} className={tab===t?'active':''} onClick={()=>setTab(t)} key={t}>{t==='Live Now'&&<i className="live-dot"/>}{t}</button>)}</div><label className="sort-control"><SlidersHorizontal size={16}/><select aria-label="Sort Moments" value={sort} onChange={e=>setSort(e.target.value)}><option value="recommended">Recommended</option><option value="chronological">Chronological</option></select></label></div>{page==='Home'&&!session&&<section className="welcome-panel"><div><span className="pill">SHARED EXPERIENCES. REAL RELATIONSHIPS.</span><h2>Don’t follow.<br/>Come along<span>.</span></h2><p>Your people are out there doing things you love.<br/>A game, a movie, a conversation. Start there.</p><button className="primary" onClick={()=>setModal('auth')}>Find my people<ArrowUpRight size={17}/></button></div><div className="welcome-art" aria-hidden="true"><div className="orbit orbit-one"/><div className="orbit orbit-two"/><div className="art-tile gaming"><Gamepad2 size={40}/></div><div className="art-tile music"><Music size={29}/></div><div className="art-tile chat"><MessageCircle size={29}/></div><div className="art-tile heart"><Heart size={35}/></div><span className="art-note">a little more<br/>in common.</span><i className="spark-one">✳</i><i className="spark-two">+</i></div></section>}<div className="category-strip"><button className={category==='All'?'active':''} onClick={()=>setCategory('All')}>All interests</button>{categories.map(c=><button className={category===c?'active':''} key={c} onClick={()=>setCategory(c)}>{c}</button>)}</div><section className="moments-section"><div className="section-head"><h2>{page==='Moments'?'Hosted, joined & saved':tab==='Live Now'?'Happening now':tab==='Friends'?'With your people':page==='Explore'?'Find your people':'Moments for you'}</h2><span className="hint">{filtered.length>0?filtered.length+' Moments':'A good place to start'}</span></div>{loading?<div className="skeleton-grid">{[1,2,3].map(i=><div className="skeleton" key={i}/>)}</div>:filtered.length>0?<><div className="moment-grid">{filtered.map(m=><Card key={m.id} m={m} uid={session?.user.id} saved={saved.includes(m.id)} onOpen={()=>open(m)} onSave={()=>void action('save',{moment_id:m.id})}/>)}</div>{hasMore&&<button className="secondary load-more" onClick={()=>void more()}>Load more Moments</button>}</>:session?<Empty title={query?'No Moments match your search.':tab==='Friends'?'Your next shared experience starts here.':'Be the first to bring people together.'} text={query?'Try another interest or search term.':'Host something you enjoy. A small group is a good start.'} action={()=>create()}/>:<div className="idea-grid">{ideas.filter(i=>category==='All'||category===i.category).map(({category:c,cover,title,text,icon:Icon})=><article className="idea-card" key={c}><div className="idea-image"><img src={'/covers/'+cover+'.webp'} alt=""/><span><Icon size={13}/>{c}</span></div><div><p className="eyebrow">YOUR NEXT MOMENT</p><h3>{title}</h3><p>{text}</p><button className="text-button" onClick={()=>create(c)}>Start a {c.toLowerCase()} Moment<ArrowUpRight size={16}/></button></div></article>)}{!ideas.some(i=>category==='All'||category===i.category)&&<Empty title={'A '+category.toLowerCase()+' Moment starts with you.'} text="Bring a few people together over something you enjoy." action={()=>create(category)}/>}</div>}</section>{page==='Home'&&<section className="how-it-works"><div className="section-head"><h2>A different kind of social.</h2><span className="hint">No audience required.</span></div><div>{[{n:'01',icon:Compass,title:'Find a Moment',text:'Something you’d enjoy doing.'},{n:'02',icon:Users,title:'Show up together',text:'A small group. A shared experience.'},{n:'03',icon:Heart,title:'Meet again',text:'Make a connection. Make another plan.'}].map(({n,icon:Icon,title,text})=><article key={n}><span>{n}</span><Icon size={23}/><h3>{title}</h3><p>{text}</p></article>)}</div></section>}</>:page==='Profile'?session&&profile?<><section className="profile-hero"><div className="profile-pattern"/><span className="avatar big">{displayName.slice(0,1)}</span><button className="secondary" onClick={()=>setModal('profile')}>Edit profile</button><h2>{displayName}</h2><p>@{profile.username||'new_member'}</p><p>{profile.bio||'A little about you goes here.'}</p><div className="chips">{profile.interests.map(i=><span key={i}>{i}</span>)}</div></section><div className="section-head"><h2>Your hosted Moments</h2></div><div className="moment-grid">{moments.filter(m=>m.host_id===session.user.id).map(m=><Card key={m.id} m={m} uid={session.user.id} saved={saved.includes(m.id)} onOpen={()=>open(m)} onSave={()=>void action('save',{moment_id:m.id})}/>)}</div></>:<Empty icon={User} title="A place that feels like you." text="Set up your profile, choose your interests, and make yourself at home." action={()=>setModal('auth')} label="Join Common"/>:page==='Connections'?<>{session?<><div className="section-head"><h2>Your people</h2><span className="hint">Mutual connections</span></div>{connections.length===0?<Empty icon={Users} title="Start with a shared experience." text="Join a Moment. When it ends, connect with someone you’d like to meet again." action={()=>navigate('Explore')} label="Explore Moments"/>:<div className="panel">{connections.map(c=>{const p=c.sender_id===session.user.id?c.recipient:c.sender;return <div className="person-row" key={c.id}><span className="avatar">{p.display_name.slice(0,1)}</span><div><strong>{p.display_name}</strong><small>{c.status==='accepted'?'Connected':c.sender_id===session.user.id?'Request sent':'Wants to connect'}</small></div>{c.status==='pending'&&c.recipient_id===session.user.id?<><button className="primary small" onClick={()=>void action('connect',{target_user:p.id,decision:'accepted'})}>Accept</button><button className="text-button" onClick={()=>void action('connect',{target_user:p.id,decision:'declined'})}>Decline</button></>:c.status==='accepted'&&<button className="text-button" onClick={()=>void action('connect',{target_user:p.id,decision:'remove'})}>Remove</button>}</div>;})}</div>}</>:<Empty icon={Users} title="People, not follower counts." text="Meet through activities and connect when you both want to." action={()=>setModal('auth')} label="Join Common"/>}</>:page==='Settings'?<div className="settings-page"><section className="panel"><div className="section-head"><h3><Sun size={18}/>Appearance</h3></div><p className="hint">A space that suits your day.</p><div className="theme-picker">{['dark','light','system'].map(t=><button className={theme===t?'selected':''} key={t} onClick={()=>void updateSettings('theme',t)}><span className={'theme-preview '+t}/>{t}<Check size={14}/></button>)}</div></section>{session?<><section className="panel"><h3><SlidersHorizontal size={18}/>Your preferences</h3>{[{key:'personalization',title:'Personalized recommendations',text:'Use your interests, language, and preferred group size.'},{key:'notifications_enabled',title:'Activity notifications',text:'Invitations, requests, and changes to your plans.'}].map(({key,title,text})=><label className="setting-row" key={key}><span><strong>{title}</strong><small>{text}</small></span><input type="checkbox" checked={settings[key as keyof typeof settings]} onChange={e=>void updateSettings(key,e.target.checked)}/></label>)}</section><section className="panel"><h3><Shield size={18}/>Your data stays yours.</h3><p className="hint">Saved Moments are private. Birth dates stay visible only to their owner. Connection requests require a completed shared Moment.</p><div className="settings-actions"><button className="secondary" onClick={()=>void exportData()}><Download size={16}/>Export my data</button><button className="secondary" onClick={()=>void logout()}><LogOut size={16}/>Sign out</button><button className="text-button danger" onClick={()=>void deleteAccount()}>Delete account</button></div></section></>:<Empty icon={Settings} title="Your space. Your preferences." text="Join Common to save your profile and account preferences." action={()=>setModal('auth')} label="Join Common"/>}</div>:<Empty icon={page==='Messages'?MessageCircle:Shapes} title={page==='Messages'?'For now, meet in a Moment.':'Build the first experiences together.'} text={page==='Messages'?'Private messaging arrives in a later release. Moment rooms already include group text chat once account setup is complete.':'Community spaces arrive in a later release. Start with a Moment around a shared interest.'} action={()=>navigate('Explore')} label="Explore Moments"/>}</>}</main>{!room&&<aside className="rightbar"><section className="panel upcoming"><div className="section-head"><h3>Your next Moments</h3><CalendarDays size={17}/></div>{upcoming.length?upcoming.map(m=><button className="upcoming-row" key={m.id} onClick={()=>open(m)}><img src={coverSource(m)} alt=""/><div><strong>{m.title}</strong><small>{dateLabel(m.start_at)}</small></div><ChevronRight size={15}/></button>):<div className="right-empty"><span className="calendar-empty"><CalendarDays size={23}/></span><p>Leave room for<br/>something good.</p><small>Your upcoming plans live here.</small><button className="text-button" onClick={()=>navigate('Explore')}>Explore Moments<ArrowRight size={14}/></button></div>}</section><section className="together-panel"><Heart size={24}/><h3>A familiar face.<br/>A new shared story.</h3><p>Connect after a Moment.<br/>Then make another one.</p><button className="secondary" onClick={()=>navigate('Connections')}>Your connections<ArrowUpRight size={15}/></button><div className="together-decoration" aria-hidden="true"><span>☺</span><span>✳</span></div></section><section className="panel weekly-prompt"><p className="eyebrow">A LITTLE NUDGE</p><span className="prompt-icon"><Coffee size={24}/></span><h3>What’s one thing<br/>you’d rather do together?</h3><p>There’s a Moment in that.</p><button className="text-button" onClick={()=>create()}>Bring it to life<Plus size={16}/></button></section><footer className="right-footer"><button onClick={()=>navigate('Settings')}>Privacy & preferences</button><p>common<span>.</span> <small>More together.</small></p></footer></aside>}</div></div><nav className="bottom-nav" aria-label="Mobile navigation">{nav.filter(n=>['Home','Explore','Moments','Connections','Profile'].includes(n.name)).map(({name,icon:Icon})=><button className={page===name?'active':''} onClick={()=>navigate(name)} key={name}><Icon size={20}/><span>{name}</span></button>)}</nav>{notice&&<div role="status" className="toast"><Check size={17}/>{notice}</div>}{modal==='auth'&&<Auth configured={configured} onClose={()=>setModal(null)} onSession={keepSession}/>} {modal==='create'&&session&&<CreateMoment session={session} initialCategory={initialCategory} onClose={()=>setModal(null)} onCreated={id=>{setModal(null);void load();open(id);setNotice('Your Moment is ready.');}}/>}{modal==='profile'&&session&&profile&&<ProfileEditor profile={profile} session={session} onClose={()=>setModal(null)} onSaved={()=>void load()}/>}</div>}
+"use client";
+import { useState, useEffect, useCallback, useRef } from "react";
+import {
+  Home,
+  Globe,
+  Compass,
+  PlusCircle,
+  Mail,
+  User,
+  Search,
+  Bell,
+  Settings,
+  Plus,
+  ChevronRight,
+  ChevronDown,
+  Users,
+  CalendarDays,
+  BarChart3,
+  LogOut,
+  Menu,
+  ArrowRight,
+  ImagePlus,
+  Video,
+  AlignLeft,
+  Bookmark,
+  Check,
+  Lock,
+  Pin,
+  Sparkles,
+  ExternalLink,
+} from "lucide-react";
+import Auth from "@/components/Auth";
+import ProfileEditor from "@/components/ProfileEditor";
+import CreateMoment from "@/components/CreateMoment";
+import Room from "@/components/Room";
+import Composer from "@/components/social/Composer";
+import WorldEditor from "@/components/social/WorldEditor";
+import CommunityEditor from "@/components/social/CommunityEditor";
+import PostCard from "@/components/social/PostCard";
+import Comments from "@/components/social/Comments";
+import Inbox from "@/components/social/Inbox";
+import CreatorSettings from "@/components/social/CreatorSettings";
+import SettingsPanel from "@/components/social/SettingsPanel";
+import MemberPicker from "@/components/social/MemberPicker";
+import Analytics from "@/components/social/Analytics";
+import {
+  Avatar,
+  WorldIcon,
+  WorldCard,
+  Empty,
+} from "@/components/social/Shared";
+import { useAccount } from "@/lib/social/useAccount";
+import {
+  read,
+  act,
+  count,
+  type Bootstrap,
+  type World,
+  type Community,
+  type Creator,
+  type Post,
+  type Cursor,
+} from "@/lib/social/client";
+import { api, dateLabel, coverSource, type Moment } from "@/lib/client";
+const primaryNav = [
+  { name: "Home", icon: Home },
+  { name: "Worlds", icon: Globe },
+  { name: "Explore", icon: Compass },
+  { name: "Create", icon: PlusCircle },
+  { name: "Inbox", icon: Mail },
+  { name: "Profile", icon: User },
+];
+const templates = [
+  {
+    name: "Gaming",
+    cover: "world-gaming",
+    icon: "gamepad",
+    description: "Games. Clips. Your next obsession.",
+  },
+  {
+    name: "Music",
+    cover: "world-music",
+    icon: "music",
+    description: "New sounds. Artists. Good company.",
+  },
+  {
+    name: "Creators",
+    cover: "world-creator",
+    icon: "camera",
+    description: "Ideas. Behind the scenes. Creator talk.",
+  },
+  {
+    name: "Comedy",
+    cover: "world-comedy",
+    icon: "smile",
+    description: "Memes. Sketches. A little less serious.",
+  },
+];
+type WorldDetail = {
+  world: World;
+  members: { user: Creator; role: string }[];
+  communities: Community[];
+  pending: Post[];
+  reports: {
+    id: string;
+    post_id: string;
+    reason: string;
+    created_at: string;
+  }[];
+};
+type CommunityDetail = {
+  community: Community;
+  members: { user: Creator; role: string; status: string }[];
+};
+type ProfileDetail = { profile: Creator; worlds: World[]; requests: Creator[] };
+type Notification = {
+  id: string;
+  title: string;
+  moment_id?: string;
+  post_id?: string;
+  world_id?: string;
+  conversation_id?: string;
+  actor_id?: string;
+  read_at?: string;
+  created_at: string;
+};
+const emptyBoot: Bootstrap = {
+  worlds: [],
+  creators: [],
+  communities: [],
+  following_ids: [],
+};
+export default function Common() {
+  const account = useAccount(),
+    { session, profile, configured } = account;
+  const [page, setPage] = useState("Home"),
+    [boot, setBoot] = useState<Bootstrap>(emptyBoot),
+    [worldId, setWorldId] = useState<string | null>(null),
+    [communityId, setCommunityId] = useState<string | null>(null),
+    [profileId, setProfileId] = useState<string | null>(null),
+    [worldDetail, setWorldDetail] = useState<WorldDetail | null>(null),
+    [communityDetail, setCommunityDetail] = useState<CommunityDetail | null>(
+      null,
+    ),
+    [creatorDetail, setCreatorDetail] = useState<ProfileDetail | null>(null),
+    [posts, setPosts] = useState<Post[]>([]),
+    [cursor, setCursor] = useState<Cursor | null>(null),
+    [tab, setTab] = useState("For You"),
+    [sort, setSort] = useState("balanced"),
+    [small, setSmall] = useState(true),
+    [followedCommunities, setFollowedCommunities] = useState(false),
+    [query, setQuery] = useState(""),
+    [searchResults, setSearchResults] = useState<Bootstrap>(emptyBoot),
+    [modal, setModal] = useState<
+      | "auth"
+      | "post"
+      | "world"
+      | "community"
+      | "profile"
+      | "settings"
+      | "customize"
+      | "event"
+      | null
+    >(null),
+    [preset, setPreset] = useState<string | undefined>(),
+    [editingWorld, setEditingWorld] = useState<World | undefined>(),
+    [quotedPost, setQuotedPost] = useState<string | undefined>(),
+    [commentPost, setCommentPost] = useState<Post | null>(null),
+    [events, setEvents] = useState<Moment[]>([]),
+    [room, setRoom] = useState<string | null>(null),
+    [inboxId, setInboxId] = useState<string | null>(null),
+    [notifications, setNotifications] = useState<Notification[]>([]),
+    [notificationOpen, setNotificationOpen] = useState(false),
+    [mobileMenu, setMobileMenu] = useState(false),
+    [loading, setLoading] = useState(true),
+    [busy, setBusy] = useState(false),
+    [onboardingDismissed, setOnboardingDismissed] = useState(false),
+    [error, setError] = useState(""),
+    [notice, setNotice] = useState(""),
+    [inviteTarget, setInviteTarget] = useState<{
+      kind: "world" | "community";
+      id: string;
+    } | null>(null);
+  const alert = useCallback((s: string) => setNotice(s), []);
+  const loadBoot = useCallback(async () => {
+    try {
+      setBoot(await read<Bootstrap>("bootstrap", {}, session));
+      if (session) {
+        const n = await api<{ items: Notification[] }>(
+          "/api/data?kind=notifications",
+          session.access_token,
+        );
+        setNotifications(n.items);
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, [session]);
+  useEffect(() => {
+    if (account.ready) void Promise.resolve().then(loadBoot);
+  }, [account.ready, loadBoot]);
+
+  useEffect(() => {
+    const theme = localStorage.getItem("common.theme.v1") || "dark",
+      media = window.matchMedia("(prefers-color-scheme: light)");
+    const apply = () => {
+      document.documentElement.dataset.theme =
+        theme === "system" ? (media.matches ? "light" : "dark") : theme;
+    };
+    apply();
+    media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
+  }, []);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(""), 4500);
+    return () => clearTimeout(timer);
+  }, [notice]);
+  function navigate(next: string) {
+    setPage(next);
+    setWorldId(
+      next === "Worlds"
+        ? boot.worlds.find((w) => w.joined || w.owner_id === session?.user.id)
+            ?.id || null
+        : null,
+    );
+    setCommunityId(null);
+    setRoom(null);
+    setProfileId(next === "Profile" ? session?.user.id || null : null);
+    setTab("For You");
+    setQuery("");
+    setMobileMenu(false);
+    history.replaceState(null, "", location.pathname);
+  }
+  function requireAccount(action: () => void) {
+    if (!session) {
+      setModal("auth");
+      return;
+    }
+    if (!profile?.onboarded) {
+      setModal("profile");
+      return;
+    }
+    action();
+  }
+  function createPost(quote?: string) {
+    requireAccount(() => {
+      setQuotedPost(quote);
+      setModal("post");
+    });
+  }
+  function openWorld(id: string) {
+    setWorldId(id);
+    setCommunityId(null);
+    setRoom(null);
+    setPage("Worlds");
+    setTab("For You");
+    setQuery("");
+    history.replaceState(null, "", "?world=" + id);
+  }
+  function openCommunity(id: string) {
+    setCommunityId(id);
+    setWorldId(null);
+    setRoom(null);
+    setPage("Communities");
+    setTab("For You");
+    history.replaceState(null, "", "?community=" + id);
+  }
+  function openProfile(id: string) {
+    setProfileId(id);
+    setWorldId(null);
+    setCommunityId(null);
+    setRoom(null);
+    setPage("Profile");
+    setTab("Posts");
+    history.replaceState(null, "", "?profile=" + id);
+    if (session && id !== session.user.id)
+      void act("visit_profile", { target_id: id }, session).catch(() => {});
+  }
+  function openComments(post: Post) {
+    setCommentPost(post);
+    history.replaceState(null, "", "?post=" + post.id);
+  }
+  async function mutation(action: string, payload: Record<string, unknown>) {
+    if (!session) {
+      setModal("auth");
+      return;
+    }
+    setBusy(true);
+    try {
+      await act(action, payload, session);
+      await refresh();
+      alert("Saved");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  const feedSequence = useRef(0);
+  const loadFeed = useCallback(
+    async (more = false, currentCursor: Cursor | null = null) => {
+      if (
+        ![
+          "Home",
+          "Worlds",
+          "Explore",
+          "Profile",
+          "Communities",
+          "Saved",
+        ].includes(page) ||
+        [
+          "Creators",
+          "Communities",
+          "Events",
+          "Members",
+          "Moderation",
+          "About",
+          "Worlds",
+        ].includes(tab)
+      )
+        return;
+      const requestId = ++feedSequence.current;
+      setLoading(true);
+      try {
+        const selectedTab =
+          page === "Saved"
+            ? "Saved"
+            : page === "Profile"
+              ? tab === "Posts"
+                ? "For You"
+                : tab
+              : tab;
+        const r = await read<{ items: Post[]; cursor: Cursor | null }>(
+          "feed",
+          {
+            world_id: worldId,
+            community_id: communityId,
+            target_id: page === "Profile" ? profileId : null,
+            query,
+            tab: selectedTab,
+            sort: page === "Profile" ? "newest" : sort,
+            small_creators: small,
+            followed_communities: followedCommunities,
+            cursor: more ? currentCursor : undefined,
+          },
+          session,
+        );
+        if (requestId !== feedSequence.current) return;
+        setPosts((v) =>
+          more
+            ? [
+                ...v,
+                ...r.items.filter(
+                  (p) => !v.some((existing) => existing.id === p.id),
+                ),
+              ]
+            : r.items,
+        );
+        setCursor(r.cursor);
+        setError("");
+      } catch (e) {
+        setError((e as Error).message);
+      } finally {
+        if (requestId === feedSequence.current) setLoading(false);
+      }
+    },
+    [
+      page,
+      tab,
+      worldId,
+      communityId,
+      profileId,
+      query,
+      sort,
+      small,
+      followedCommunities,
+      session,
+    ],
+  );
+  useEffect(() => {
+    if (!account.ready) return;
+    const timer = setTimeout(() => void loadFeed(), query ? 250 : 0);
+    return () => clearTimeout(timer);
+  }, [account.ready, query, loadFeed]);
+  const loadContext = useCallback(async () => {
+    try {
+      if (worldId) {
+        const r = await read<WorldDetail>(
+          "world",
+          { world_id: worldId },
+          session,
+        );
+        setWorldDetail(r);
+        if (r.world.preferences) {
+          setSort(r.world.preferences.sort);
+          setSmall(r.world.preferences.small_creators);
+          setFollowedCommunities(r.world.preferences.followed_communities);
+        } else {
+          setSort("balanced");
+          setSmall(true);
+          setFollowedCommunities(false);
+        }
+      }
+      if (communityId)
+        setCommunityDetail(
+          await read<CommunityDetail>(
+            "community",
+            { community_id: communityId },
+            session,
+          ),
+        );
+      if (profileId)
+        setCreatorDetail(
+          await read<ProfileDetail>(
+            "profile",
+            { target_id: profileId },
+            session,
+          ),
+        );
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, [worldId, communityId, profileId, session]);
+  useEffect(() => {
+    void Promise.resolve().then(loadContext);
+  }, [loadContext]);
+  const loadEvents = useCallback(async () => {
+    if (!session) return;
+    try {
+      const r = await api<{ items: Moment[] }>(
+        "/api/data?kind=moments",
+        session.access_token,
+      );
+      setEvents(r.items);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, [session]);
+  useEffect(() => {
+    if (page === "Events" || tab === "Events")
+      void Promise.resolve().then(loadEvents);
+  }, [page, tab, loadEvents]);
+  async function refresh() {
+    await Promise.all([loadBoot(), loadContext(), loadFeed()]);
+  }
+  useEffect(() => {
+    if (page !== "Explore") return;
+    const timer = setTimeout(() => {
+      void read<Bootstrap>("search", { query }, session)
+        .then(setSearchResults)
+        .catch((e) => setError(e.message));
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [query, page, session]);
+  useEffect(() => {
+    if (!account.ready) return;
+    void Promise.resolve().then(() => {
+      const q = new URLSearchParams(location.search);
+      if (q.get("world")) openWorld(q.get("world")!);
+      else if (q.get("community")) openCommunity(q.get("community")!);
+      else if (q.get("profile")) openProfile(q.get("profile")!);
+      else if (q.get("post"))
+        void read<Post>("post", { post_id: q.get("post") }, session)
+          .then((p) => {
+            if (p) setCommentPost(p);
+          })
+          .catch((e) => setError(e.message));
+    });
+    // Restore the initial URL once; subsequent route changes use navigation handlers.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account.ready]);
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false,
+      stop = () => {};
+    void (async () => {
+      const cfg = await api<{ url: string; key: string }>("/api/config");
+      const { createClient } = await import("@supabase/supabase-js");
+      if (cancelled) return;
+      const c = createClient(cfg.url, cfg.key, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      await c.realtime.setAuth(session.access_token);
+      const ch = c
+        .channel("common-notifications")
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "notifications",
+            filter: "user_id=eq." + session.user.id,
+          },
+          () => void loadBoot(),
+        )
+        .subscribe();
+      stop = () => {
+        void c.removeChannel(ch);
+      };
+    })().catch(() => {});
+    return () => {
+      cancelled = true;
+      stop();
+    };
+  }, [session, loadBoot]);
+  async function preference(k: string, v: unknown) {
+    const values = {
+      sort,
+      small_creators: small,
+      followed_communities: followedCommunities,
+      [k]: v,
+    };
+    if (k === "sort") setSort(String(v));
+    if (k === "small_creators") setSmall(Boolean(v));
+    if (k === "followed_communities") setFollowedCommunities(Boolean(v));
+    if (worldId && session)
+      try {
+        await act(
+          "world_preferences",
+          { world_id: worldId, ...values },
+          session,
+        );
+        await loadContext();
+      } catch (e) {
+        setError((e as Error).message);
+      }
+  }
+  async function message(id: string) {
+    if (!session) {
+      setModal("auth");
+      return;
+    }
+    try {
+      const r = await act<{ id: string }>(
+        "create_conversation",
+        { members: [id], title: "" },
+        session,
+      );
+      setInboxId(r.id);
+      navigate("Inbox");
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  const activeWorld = worldId
+      ? worldDetail?.world.id === worldId
+        ? worldDetail.world
+        : boot.worlds.find((w) => w.id === worldId)
+      : null,
+    activeCommunity = communityId ? communityDetail?.community : null,
+    creator =
+      creatorDetail?.profile.id === profileId ? creatorDetail.profile : null,
+    ownProfile = profileId === session?.user.id;
+  const me: Creator = {
+    id: profile?.id || "",
+    display_name: profile?.display_name || "Your profile",
+    username: profile?.username || "new_member",
+    bio: profile?.bio || "",
+    interests: profile?.interests || [],
+    accent: "#7954ff",
+    layout: "grid",
+    social_links: {},
+    visibility: "public",
+    follower_count: 0,
+    following_count: 0,
+    post_count: 0,
+    following: false,
+    follows_you: false,
+  };
+  const myWorlds = boot.worlds.filter(
+      (w) => w.joined || w.owner_id === session?.user.id,
+    ),
+    railWorlds = page === "Worlds" ? myWorlds : myWorlds.slice(0, 4);
+  const unread = notifications.filter((n) => !n.read_at).length;
+  const title =
+    page === "Home"
+      ? "Your feed. Your people."
+      : page === "Worlds"
+        ? "Your Worlds"
+        : page === "Explore"
+          ? "Find your next obsession."
+          : page === "Profile"
+            ? creator?.display_name || "Your profile"
+            : page === "Communities"
+              ? "Your communities"
+              : page === "Events"
+                ? "Events & activities"
+                : page === "Saved"
+                  ? "Saved posts"
+                  : page === "Analytics"
+                    ? "Creator dashboard"
+                    : "Inbox";
+  const visibleEvents = events.filter(
+    (m) =>
+      (!communityId && !worldId) ||
+      (communityId && m.community_id === communityId) ||
+      (worldId && m.world_id === worldId),
+  );
+  function postList() {
+    return loading ? (
+      <div className="social-skeletons">
+        {[1, 2, 3].map((i) => (
+          <div key={i} />
+        ))}
+      </div>
+    ) : posts.length ? (
+      <>
+        <div
+          className={
+            "social-feed " +
+            (page === "Profile" && creator?.layout === "list" ? "list" : "")
+          }
+        >
+          {posts.map((p) => (
+            <PostCard
+              post={p}
+              session={session}
+              key={p.id}
+              onAuth={() => setModal("auth")}
+              onComment={openComments}
+              onProfile={openProfile}
+              onWorld={openWorld}
+              onCommunity={openCommunity}
+              onQuote={createPost}
+              onChanged={() => void refresh()}
+              onNotice={alert}
+            />
+          ))}
+        </div>
+        {cursor && (
+          <button
+            className="secondary load-more"
+            onClick={() => void loadFeed(true, cursor)}
+          >
+            Load more posts
+          </button>
+        )}
+      </>
+    ) : (
+      <Empty
+        title={
+          query
+            ? "No posts match your search."
+            : activeWorld
+              ? "Your World starts with you."
+              : "Make the first post worth coming back for."
+        }
+        text={
+          activeWorld?.kind === "personal"
+            ? "Follow creators or broaden your topics to fill this feed."
+            : "Share a clip, a photo, a thought. Keep it original."
+        }
+        action={() => createPost()}
+        label="Create a post"
+      />
+    );
+  }
+  function peopleList(people: Creator[]) {
+    return (
+      <div className="creator-grid">
+        {people.filter(Boolean).map((p) => (
+          <article className="creator-tile" key={p.id}>
+            <button onClick={() => openProfile(p.id)}>
+              <Avatar person={p} size="large" />
+              <h3>{p.display_name}</h3>
+              <small>@{p.username}</small>
+              <p>{p.bio}</p>
+            </button>
+            <span>{count(p.follower_count)} followers</span>
+            <button
+              className="primary small"
+              onClick={() => void mutation("follow", { target_id: p.id })}
+            >
+              {p.following ? "Following" : "Follow"}
+            </button>
+          </article>
+        ))}
+      </div>
+    );
+  }
+  function communityList(items: Community[]) {
+    return (
+      <div className="community-grid">
+        {items.map((c) => (
+          <article className="community-card" key={c.id}>
+            <span className="world-symbol">
+              <Users size={22} />
+            </span>
+            <div>
+              <button
+                className="card-title"
+                onClick={() => openCommunity(c.id)}
+              >
+                {c.name}
+              </button>
+              <small>{count(c.member_count)} members</small>
+              <p>{c.description}</p>
+            </div>
+            <button
+              className="secondary small"
+              onClick={() =>
+                void mutation(
+                  c.membership === "active"
+                    ? "leave_community"
+                    : "join_community",
+                  { community_id: c.id },
+                )
+              }
+            >
+              {c.membership === "active"
+                ? "Joined"
+                : c.membership === "pending"
+                  ? "Requested"
+                  : "Join"}
+            </button>
+          </article>
+        ))}
+      </div>
+    );
+  }
+  function eventList() {
+    return (
+      <>
+        <div className="section-head">
+          <h2>
+            {activeCommunity
+              ? "Community Events"
+              : activeWorld
+                ? "World Events"
+                : "Your Events"}
+          </h2>
+          <button
+            className="primary small"
+            onClick={() => requireAccount(() => setModal("event"))}
+          >
+            <Plus size={16} />
+            Host an Event
+          </button>
+        </div>
+        {!session ? (
+          <Empty
+            title="A little more time together."
+            text="Sign in to join activities and revisit your Moments."
+            action={() => setModal("auth")}
+            label="Sign in"
+          />
+        ) : visibleEvents.length ? (
+          <div className="event-grid">
+            {visibleEvents.map((m) => (
+              <button
+                className="event-card"
+                key={m.id}
+                onClick={() => setRoom(m.id)}
+              >
+                <img src={coverSource(m)} alt="" />
+                <span className={"status " + m.status}>{m.status}</span>
+                <div>
+                  <h3>{m.title}</h3>
+                  <p>{dateLabel(m.start_at)}</p>
+                  <small>
+                    {m.participants.length}/{m.capacity} people · {m.category}
+                  </small>
+                </div>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <Empty
+            title="A shared experience belongs here too."
+            text="Host a game, a watch party, or a conversation. Your original Moments remain available here."
+            action={() => setModal("event")}
+            label="Host an Event"
+          />
+        )}
+      </>
+    );
+  }
+  return (
+    <div className="social-shell">
+      <a className="skip-link" href="#main">
+        Skip to content
+      </a>
+      <aside className={"social-sidebar " + (mobileMenu ? "mobile-open" : "")}>
+        <button className="brand" onClick={() => navigate("Home")}>
+          common<span>.</span>
+        </button>
+        <p className="brand-tagline">
+          Your feed. Your interests. Your community.
+        </p>
+        <nav aria-label="Primary navigation">
+          {primaryNav.map(({ name, icon: Icon }) => (
+            <button
+              className={page === name ? "active" : ""}
+              key={name}
+              onClick={() =>
+                name === "Create"
+                  ? createPost()
+                  : name === "Profile"
+                    ? session
+                      ? openProfile(session.user.id)
+                      : setModal("auth")
+                    : navigate(name)
+              }
+            >
+              <Icon size={20} />
+              <span>{name}</span>
+              {name === "Inbox" && unread > 0 && <i>{unread}</i>}
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-pitch">
+          <Globe size={24} />
+          <h3>
+            One post.
+            <br />
+            Many Worlds.
+          </h3>
+          <p>
+            Share your post across Worlds. Keep your audience and every
+            conversation in one place.
+          </p>
+          <button onClick={() => navigate("Worlds")}>
+            Find your World
+            <ArrowRight size={15} />
+          </button>
+        </div>
+        <footer>
+          <button
+            className="sidebar-user"
+            onClick={() =>
+              session ? openProfile(session.user.id) : setModal("auth")
+            }
+          >
+            <Avatar person={creator && ownProfile ? creator : me} />
+            <span>
+              <strong>{session ? me.display_name : "Join Common"}</strong>
+              <small>
+                {session ? "@" + me.username : "Make yourself at home"}
+              </small>
+            </span>
+          </button>
+          <details className="account-menu">
+            <summary aria-label="Account menu">
+              <ChevronDown size={16} />
+            </summary>
+            <div>
+              <button onClick={() => setModal("settings")}>
+                <Settings size={15} />
+                Settings
+              </button>
+              <button onClick={() => navigate("Communities")}>
+                <Users size={15} />
+                Communities
+              </button>
+              <button onClick={() => navigate("Events")}>
+                <CalendarDays size={15} />
+                Events & activities
+              </button>
+              <button onClick={() => navigate("Saved")}>
+                <Bookmark size={15} />
+                Saved posts
+              </button>
+              <button
+                onClick={() =>
+                  session ? navigate("Analytics") : setModal("auth")
+                }
+              >
+                <BarChart3 size={15} />
+                Creator dashboard
+              </button>
+              {session && (
+                <button
+                  onClick={() =>
+                    void account
+                      .logout()
+                      .then(() => navigate("Home"))
+                      .catch((e) => setError(e.message))
+                  }
+                >
+                  <LogOut size={15} />
+                  Sign out
+                </button>
+              )}
+            </div>
+          </details>
+        </footer>
+      </aside>
+      <div className="social-workspace">
+        <header className="social-topbar">
+          <button
+            className="icon-button mobile-menu"
+            aria-label="Open navigation"
+            onClick={() => setMobileMenu(!mobileMenu)}
+          >
+            <Menu size={20} />
+          </button>
+          <button
+            className="brand mobile-brand"
+            onClick={() => navigate("Home")}
+          >
+            common<span>.</span>
+          </button>
+          <label className="search">
+            <Search size={17} />
+            <input
+              value={query}
+              aria-label="Search Common"
+              onChange={(e) => {
+                setQuery(e.target.value);
+                if (page !== "Explore") {
+                  setPage("Explore");
+                  setWorldId(null);
+                  setCommunityId(null);
+                  setProfileId(null);
+                }
+              }}
+              placeholder="Search for people, Worlds, or topics…"
+            />
+          </label>
+          <div>
+            <button className="top-create" onClick={() => createPost()}>
+              <Plus size={16} />
+              Create post
+            </button>
+            <div className="notification-wrapper">
+              <button
+                className="icon-button"
+                aria-label="Notifications"
+                onClick={() =>
+                  session
+                    ? setNotificationOpen(!notificationOpen)
+                    : setModal("auth")
+                }
+              >
+                <Bell size={20} />
+                {unread > 0 && <i className="notification-dot" />}
+              </button>
+              {notificationOpen && (
+                <div className="notification-menu">
+                  <header>
+                    <h3>Notifications</h3>
+                    <button
+                      className="text-button"
+                      onClick={() => {
+                        if (session)
+                          void api("/api/data", session.access_token, {
+                            action: "read_notifications",
+                          }).then(loadBoot);
+                      }}
+                    >
+                      Mark all read
+                    </button>
+                  </header>
+                  {notifications.length ? (
+                    notifications.map((n) => (
+                      <button
+                        key={n.id}
+                        onClick={() => {
+                          setNotificationOpen(false);
+                          if (n.post_id)
+                            void read<Post>(
+                              "post",
+                              { post_id: n.post_id },
+                              session,
+                            ).then((p) => {
+                              if (p) openComments(p);
+                            });
+                          else if (n.world_id) openWorld(n.world_id);
+                          else if (n.conversation_id) {
+                            setInboxId(n.conversation_id);
+                            navigate("Inbox");
+                          } else if (n.moment_id) {
+                            navigate("Events");
+                            setRoom(n.moment_id);
+                          } else if (n.actor_id) openProfile(n.actor_id);
+                        }}
+                      >
+                        <strong>{n.title}</strong>
+                        <small>{dateLabel(n.created_at)}</small>
+                      </button>
+                    ))
+                  ) : (
+                    <p className="hint">You’re all caught up.</p>
+                  )}
+                </div>
+              )}
+            </div>
+            <button
+              className="top-avatar"
+              aria-label="Your profile"
+              onClick={() =>
+                session ? openProfile(session.user.id) : setModal("auth")
+              }
+            >
+              <Avatar person={me} />
+            </button>
+          </div>
+        </header>
+        <div
+          className={
+            "social-content " +
+            (["Inbox", "Events"].includes(page) || room ? "wide-content" : "")
+          }
+        >
+          <main id="main" aria-busy={busy || loading}>
+            {(error || account.error) && (
+              <div className="error-banner" role="alert">
+                <p>{error || account.error}</p>
+                <button
+                  onClick={() => {
+                    setError("");
+                    account.setError("");
+                    void refresh();
+                  }}
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+            {room && session ? (
+              <Room
+                id={room}
+                session={session}
+                onBack={() => setRoom(null)}
+                onChanged={() => void loadEvents()}
+                onNotice={alert}
+              />
+            ) : (
+              <>
+                <div className="social-page-heading">
+                  <div>
+                    <h1>{title}</h1>
+                    <p>
+                      {page === "Worlds"
+                        ? "Customizable feeds for everything you’re into."
+                        : page === "Home"
+                          ? "Videos, photos, and conversations that feel like you."
+                          : page === "Explore"
+                            ? "New creators. Shared interests. Something worth finding."
+                            : page === "Communities"
+                              ? "Smaller groups. Ongoing conversations. Shared interests."
+                              : page === "Events"
+                                ? "Your original Moments, now part of a bigger Common."
+                                : page === "Profile"
+                                  ? ""
+                                  : page === "Inbox"
+                                    ? "Keep your conversations going."
+                                    : "Your corner of Common."}
+                    </p>
+                  </div>
+                  {page === "Worlds" && (
+                    <button
+                      className="primary"
+                      onClick={() =>
+                        requireAccount(() => {
+                          setEditingWorld(undefined);
+                          setPreset(undefined);
+                          setModal("world");
+                        })
+                      }
+                    >
+                      <Plus size={17} />
+                      Create a World
+                    </button>
+                  )}
+                  {page === "Communities" && !communityId && (
+                    <button
+                      className="primary"
+                      onClick={() =>
+                        requireAccount(() => setModal("community"))
+                      }
+                    >
+                      <Plus size={17} />
+                      New community
+                    </button>
+                  )}
+                </div>
+                {page === "Inbox" ? (
+                  <Inbox
+                    key={inboxId || "inbox"}
+                    session={session}
+                    initialId={inboxId}
+                    onNotice={alert}
+                    onAuth={() => setModal("auth")}
+                  />
+                ) : page === "Analytics" && session ? (
+                  <Analytics session={session} onPost={openComments} />
+                ) : page === "Events" ? (
+                  eventList()
+                ) : (
+                  <>
+                    {(page === "Home" || page === "Worlds") && (
+                      <section className="world-rail" aria-label="Your Worlds">
+                        {railWorlds.length
+                          ? railWorlds.map((w) => (
+                              <WorldCard
+                                key={w.id}
+                                world={w}
+                                selected={worldId === w.id}
+                                onClick={() => openWorld(w.id)}
+                              />
+                            ))
+                          : templates.map((t) => (
+                              <button
+                                className="world-card template"
+                                key={t.name}
+                                onClick={() =>
+                                  requireAccount(() => {
+                                    setEditingWorld(undefined);
+                                    setPreset(t.name);
+                                    setModal("world");
+                                  })
+                                }
+                              >
+                                <img
+                                  src={"/covers/" + t.cover + ".webp"}
+                                  alt=""
+                                />
+                                <div className="world-shade" />
+                                <div className="world-card-content">
+                                  <span className={"world-symbol " + t.icon}>
+                                    <WorldIcon name={t.icon} size={22} />
+                                  </span>
+                                  <strong>{t.name} World</strong>
+                                  <small>{t.description}</small>
+                                  <span className="world-card-meta">
+                                    <Plus size={11} />
+                                    Create your own
+                                  </span>
+                                </div>
+                              </button>
+                            ))}
+                      </section>
+                    )}
+                    {page === "Home" && (
+                      <button
+                        className="inline-composer"
+                        onClick={() => createPost()}
+                      >
+                        <Avatar person={me} />
+                        <span>What do you want to share?</span>
+                        <Video size={20} />
+                        <ImagePlus size={20} />
+                        <AlignLeft size={20} />
+                      </button>
+                    )}
+                    {activeWorld && (
+                      <section className="world-feed-header">
+                        <div className="world-feed-title">
+                          <span className={"world-symbol " + activeWorld.icon}>
+                            <WorldIcon name={activeWorld.icon} size={22} />
+                          </span>
+                          <div>
+                            <h2>{activeWorld.name}</h2>
+                            <small>
+                              {activeWorld.kind === "personal" ? (
+                                <>
+                                  <Lock size={10} />
+                                  Private personal feed
+                                </>
+                              ) : (
+                                count(activeWorld.member_count) + " members"
+                              )}
+                            </small>
+                          </div>
+                          {activeWorld.kind === "public" &&
+                            activeWorld.owner_id !== session?.user.id && (
+                              <button
+                                className="secondary small"
+                                onClick={() =>
+                                  void mutation(
+                                    activeWorld.joined
+                                      ? "leave_world"
+                                      : "join_world",
+                                    { world_id: activeWorld.id },
+                                  )
+                                }
+                              >
+                                {activeWorld.joined ? "Joined" : "Join World"}
+                              </button>
+                            )}
+                          {activeWorld.owner_id === session?.user.id && (
+                            <button
+                              className="icon-button"
+                              aria-label="Customize World"
+                              onClick={() => {
+                                setEditingWorld(activeWorld);
+                                setModal("world");
+                              }}
+                            >
+                              <Settings size={18} />
+                            </button>
+                          )}
+                        </div>
+                        <p>{activeWorld.description}</p>
+                        <div className="world-feed-controls">
+                          <label>
+                            Feed style
+                            <select
+                              value={sort}
+                              onChange={(e) =>
+                                void preference("sort", e.target.value)
+                              }
+                            >
+                              <option value="balanced">Balanced</option>
+                              <option value="newest">Newest</option>
+                              <option value="popular">Popular</option>
+                            </select>
+                          </label>
+                          <div>
+                            <label>
+                              <input
+                                type="checkbox"
+                                checked={small}
+                                onChange={(e) =>
+                                  void preference(
+                                    "small_creators",
+                                    e.target.checked,
+                                  )
+                                }
+                              />
+                              Small creators
+                            </label>
+                            <label>
+                              <input
+                                type="checkbox"
+                                checked={followedCommunities}
+                                onChange={(e) =>
+                                  void preference(
+                                    "followed_communities",
+                                    e.target.checked,
+                                  )
+                                }
+                              />
+                              Communities you follow
+                            </label>
+                          </div>
+                        </div>
+                        {activeWorld.announcement && (
+                          <div className="announcement">
+                            <Pin size={16} />
+                            <p>{activeWorld.announcement}</p>
+                          </div>
+                        )}
+                      </section>
+                    )}
+                    {activeCommunity && (
+                      <section className="community-header panel">
+                        <div className="section-head">
+                          <h2>{activeCommunity.name}</h2>
+                          <button
+                            className="primary small"
+                            onClick={() =>
+                              void mutation(
+                                activeCommunity.membership === "active"
+                                  ? "leave_community"
+                                  : "join_community",
+                                { community_id: activeCommunity.id },
+                              )
+                            }
+                          >
+                            {activeCommunity.membership === "active"
+                              ? "Joined"
+                              : activeCommunity.membership === "pending"
+                                ? "Requested"
+                                : "Join"}
+                          </button>
+                        </div>
+                        <p>{activeCommunity.description}</p>
+                        <small>{activeCommunity.member_count} members</small>
+                        {activeCommunity.announcement && (
+                          <div className="announcement">
+                            <Pin size={16} />
+                            <p>{activeCommunity.announcement}</p>
+                          </div>
+                        )}
+                        {["owner", "moderator"].includes(
+                          activeCommunity.role || "",
+                        ) && (
+                          <button
+                            className="text-button"
+                            onClick={() => {
+                              const body = window.prompt(
+                                "Community announcement",
+                                activeCommunity.announcement,
+                              );
+                              if (body !== null)
+                                void mutation("community_announcement", {
+                                  community_id: activeCommunity.id,
+                                  body,
+                                });
+                            }}
+                          >
+                            Edit announcement
+                          </button>
+                        )}
+                      </section>
+                    )}
+                    {page === "Profile" && creator && (
+                      <section
+                        className="creator-profile"
+                        style={
+                          {
+                            "--profile-accent": creator.accent,
+                          } as React.CSSProperties
+                        }
+                      >
+                        <div className="creator-banner">
+                          {creator.banner_path_url && (
+                            <img src={creator.banner_path_url} alt="" />
+                          )}
+                        </div>
+                        <div className="creator-info">
+                          <Avatar person={creator} size="profile-avatar" />
+                          <div className="profile-actions">
+                            {ownProfile ? (
+                              <>
+                                <button
+                                  className="secondary"
+                                  onClick={() => setModal("profile")}
+                                >
+                                  Edit profile
+                                </button>
+                                <button
+                                  className="primary"
+                                  onClick={() => setModal("customize")}
+                                >
+                                  Customize
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  className="primary"
+                                  onClick={() =>
+                                    void mutation("follow", {
+                                      target_id: creator.id,
+                                    })
+                                  }
+                                >
+                                  {creator.following ? "Following" : "Follow"}
+                                </button>
+                                <button
+                                  className="secondary"
+                                  onClick={() => void message(creator.id)}
+                                >
+                                  Message
+                                </button>
+                              </>
+                            )}
+                            <button
+                              className="icon-button"
+                              aria-label="Share profile"
+                              onClick={() =>
+                                void navigator.clipboard
+                                  .writeText(
+                                    location.origin + "/?profile=" + creator.id,
+                                  )
+                                  .then(() => alert("Profile link copied"))
+                              }
+                            >
+                              <ExternalLink size={17} />
+                            </button>
+                          </div>
+                          <h2>{creator.display_name}</h2>
+                          <small>@{creator.username}</small>
+                          <p>{creator.bio}</p>
+                          <div className="profile-counts">
+                            <span>
+                              <strong>{count(creator.follower_count)}</strong>{" "}
+                              followers
+                            </span>
+                            <span>
+                              <strong>{count(creator.following_count)}</strong>{" "}
+                              following
+                            </span>
+                            <span>
+                              <strong>{count(creator.post_count)}</strong> posts
+                            </span>
+                          </div>
+                        </div>
+                      </section>
+                    )}
+                    {page === "Explore" && (
+                      <section className="discovery-results">
+                        {searchResults.worlds.length > 0 && (
+                          <>
+                            <div className="section-head">
+                              <h2>Worlds to explore</h2>
+                            </div>
+                            <div className="world-rail">
+                              {searchResults.worlds.map((w) => (
+                                <WorldCard
+                                  world={w}
+                                  key={w.id}
+                                  onClick={() => openWorld(w.id)}
+                                />
+                              ))}
+                            </div>
+                          </>
+                        )}
+                        {searchResults.creators.length > 0 && (
+                          <>
+                            <div className="section-head">
+                              <h2>Creators</h2>
+                            </div>
+                            {peopleList(searchResults.creators)}
+                          </>
+                        )}
+                        {searchResults.communities.length > 0 && (
+                          <>
+                            <div className="section-head">
+                              <h2>Communities</h2>
+                            </div>
+                            {communityList(searchResults.communities)}
+                          </>
+                        )}
+                      </section>
+                    )}
+                    {page === "Communities" && !communityId ? (
+                      <>
+                        {communityList(boot.communities)}
+                        {boot.communities.length === 0 && (
+                          <Empty
+                            title="A community starts with a shared interest."
+                            text="Create a smaller space for discussions, posts and Events."
+                            action={() =>
+                              requireAccount(() => setModal("community"))
+                            }
+                            label="Create a community"
+                          />
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <div
+                          className="social-feed-tabs"
+                          role="tablist"
+                          aria-label="Content filters"
+                        >
+                          {(page === "Profile"
+                            ? [
+                                "Posts",
+                                "Videos",
+                                "Images",
+                                "Discussions",
+                                "Worlds",
+                                "About",
+                              ]
+                            : activeWorld
+                              ? [
+                                  "For You",
+                                  "Videos",
+                                  "Images",
+                                  "Discussions",
+                                  "Creators",
+                                  "Communities",
+                                  "Events",
+                                  ...(["owner", "moderator"].includes(
+                                    activeWorld.role || "",
+                                  )
+                                    ? ["Moderation"]
+                                    : []),
+                                ]
+                              : activeCommunity
+                                ? [
+                                    "For You",
+                                    "Discussions",
+                                    "Events",
+                                    "Members",
+                                  ]
+                                : [
+                                    "For You",
+                                    "Following",
+                                    "Videos",
+                                    "Images",
+                                    "Discussions",
+                                    "Recent",
+                                  ]
+                          ).map((t) => (
+                            <button
+                              role="tab"
+                              aria-selected={tab === t}
+                              className={tab === t ? "active" : ""}
+                              onClick={() => setTab(t)}
+                              key={t}
+                            >
+                              {t}
+                            </button>
+                          ))}
+                        </div>
+                        {tab === "Events" ? (
+                          eventList()
+                        ) : tab === "Creators" ? (
+                          peopleList(
+                            (worldDetail?.members || []).map((m) => m.user),
+                          )
+                        ) : tab === "Communities" ? (
+                          communityList(worldDetail?.communities || [])
+                        ) : tab === "Worlds" ? (
+                          <div className="world-rail">
+                            {creatorDetail?.worlds.map((w) => (
+                              <WorldCard
+                                key={w.id}
+                                world={w}
+                                onClick={() => openWorld(w.id)}
+                              />
+                            ))}
+                          </div>
+                        ) : tab === "About" && creator ? (
+                          <div className="panel">
+                            <h3>About {creator.display_name}</h3>
+                            <p>{creator.bio || "No bio yet."}</p>
+                            <div className="topic-picker">
+                              {creator.interests.map((i) => (
+                                <span key={i}>{i}</span>
+                              ))}
+                            </div>
+                            {Object.entries(creator.social_links || {}).map(
+                              ([name, url]) => (
+                                <a
+                                  className="social-link"
+                                  key={name}
+                                  href={url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                >
+                                  {name}
+                                  <ExternalLink size={13} />
+                                </a>
+                              ),
+                            )}
+                            {ownProfile &&
+                              creatorDetail &&
+                              creatorDetail.requests.length > 0 && (
+                                <>
+                                  <h3>Follow requests</h3>
+                                  {creatorDetail.requests
+                                    .filter(Boolean)
+                                    .map((p) => (
+                                      <div className="person-row" key={p.id}>
+                                        <Avatar person={p} />
+                                        <strong>{p.display_name}</strong>
+                                        <button
+                                          className="primary small"
+                                          onClick={() =>
+                                            void mutation("accept_follow", {
+                                              target_id: p.id,
+                                            })
+                                          }
+                                        >
+                                          Accept
+                                        </button>
+                                        <button
+                                          className="text-button"
+                                          onClick={() =>
+                                            void mutation("decline_follow", {
+                                              target_id: p.id,
+                                            })
+                                          }
+                                        >
+                                          Decline
+                                        </button>
+                                      </div>
+                                    ))}
+                                </>
+                              )}
+                          </div>
+                        ) : tab === "Members" ? (
+                          <div className="panel">
+                            {communityDetail?.members
+                              .filter((m) => m.user)
+                              .map((m) => (
+                                <div className="person-row" key={m.user.id}>
+                                  <Avatar person={m.user} />
+                                  <button
+                                    onClick={() => openProfile(m.user.id)}
+                                  >
+                                    {m.user.display_name}
+                                  </button>
+                                  <small>
+                                    {m.role} · {m.status}
+                                  </small>
+                                  {["owner", "moderator"].includes(
+                                    activeCommunity?.role || "",
+                                  ) &&
+                                    m.status === "pending" && (
+                                      <button
+                                        className="primary small"
+                                        onClick={() =>
+                                          void mutation("approve_member", {
+                                            community_id: communityId,
+                                            target_id: m.user.id,
+                                          })
+                                        }
+                                      >
+                                        Approve
+                                      </button>
+                                    )}
+                                  {activeCommunity?.role === "owner" &&
+                                    m.user.id !== session?.user.id && (
+                                      <button
+                                        className="secondary small"
+                                        onClick={() =>
+                                          void mutation("community_role", {
+                                            community_id: communityId,
+                                            target_id: m.user.id,
+                                            role:
+                                              m.role === "moderator"
+                                                ? "member"
+                                                : "moderator",
+                                          })
+                                        }
+                                      >
+                                        {m.role === "moderator"
+                                          ? "Remove moderator"
+                                          : "Make moderator"}
+                                      </button>
+                                    )}
+                                </div>
+                              ))}
+                            {activeCommunity?.role === "owner" && (
+                              <button
+                                className="secondary"
+                                onClick={() => {
+                                  if (communityId)
+                                    setInviteTarget({
+                                      kind: "community",
+                                      id: communityId,
+                                    });
+                                }}
+                              >
+                                Invite a member
+                              </button>
+                            )}
+                          </div>
+                        ) : tab === "Moderation" && activeWorld ? (
+                          <div className="moderation-panel">
+                            <section className="panel">
+                              <h3>Pending posts</h3>
+                              {worldDetail?.pending.length ? (
+                                worldDetail.pending.filter(Boolean).map((p) => (
+                                  <div className="pending-post" key={p.id}>
+                                    <strong>{p.author?.display_name}</strong>
+                                    <p>{p.title || p.body}</p>
+                                    <button
+                                      className="primary small"
+                                      onClick={() =>
+                                        void mutation("approve_post", {
+                                          world_id: worldId,
+                                          post_id: p.id,
+                                        })
+                                      }
+                                    >
+                                      Approve
+                                    </button>
+                                    <button
+                                      className="secondary small"
+                                      onClick={() =>
+                                        void mutation("remove_world_post", {
+                                          world_id: worldId,
+                                          post_id: p.id,
+                                        })
+                                      }
+                                    >
+                                      Remove
+                                    </button>
+                                  </div>
+                                ))
+                              ) : (
+                                <p className="hint">
+                                  No posts waiting for review.
+                                </p>
+                              )}
+                              <h3>World reports</h3>
+                              {worldDetail?.reports.map((r) => (
+                                <div className="pending-post" key={r.id}>
+                                  <p>{r.reason}</p>
+                                  <button
+                                    className="secondary small"
+                                    onClick={() =>
+                                      void mutation("remove_world_post", {
+                                        world_id: worldId,
+                                        post_id: r.post_id,
+                                      })
+                                    }
+                                  >
+                                    Remove reported post from World
+                                  </button>
+                                </div>
+                              ))}
+                            </section>
+                            <section className="panel">
+                              <h3>Announcement</h3>
+                              <button
+                                className="secondary"
+                                onClick={() => {
+                                  const body = window.prompt(
+                                    "World announcement",
+                                    activeWorld.announcement,
+                                  );
+                                  if (body !== null)
+                                    void mutation("world_announcement", {
+                                      world_id: worldId,
+                                      body,
+                                    });
+                                }}
+                              >
+                                Update announcement
+                              </button>
+                              <h3>Members and moderators</h3>
+                              {worldDetail?.members
+                                .filter((m) => m.user)
+                                .map((m) => (
+                                  <div className="person-row" key={m.user.id}>
+                                    <Avatar person={m.user} />
+                                    <strong>{m.user.display_name}</strong>
+                                    <small>{m.role}</small>
+                                    {activeWorld.owner_id ===
+                                      session?.user.id &&
+                                      m.user.id !== session.user.id && (
+                                        <button
+                                          className="secondary small"
+                                          onClick={() =>
+                                            void mutation("world_role", {
+                                              world_id: worldId,
+                                              target_id: m.user.id,
+                                              role:
+                                                m.role === "moderator"
+                                                  ? "member"
+                                                  : "moderator",
+                                            })
+                                          }
+                                        >
+                                          {m.role === "moderator"
+                                            ? "Make member"
+                                            : "Make moderator"}
+                                        </button>
+                                      )}
+                                  </div>
+                                ))}
+                              {activeWorld.owner_id === session?.user.id && (
+                                <button
+                                  className="secondary"
+                                  onClick={() => {
+                                    if (worldId)
+                                      setInviteTarget({
+                                        kind: "world",
+                                        id: worldId,
+                                      });
+                                  }}
+                                >
+                                  Invite a member
+                                </button>
+                              )}
+                              <p className="hint">{activeWorld.rules}</p>
+                            </section>
+                          </div>
+                        ) : (
+                          postList()
+                        )}
+                      </>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+          </main>
+          {!["Inbox", "Events"].includes(page) && !room && (
+            <aside className="social-rightbar">
+              <section className="panel">
+                <div className="section-head">
+                  <h3>Trending Worlds</h3>
+                  <button onClick={() => navigate("Explore")}>See all</button>
+                </div>
+                {boot.worlds
+                  .filter((w) => w.kind === "public")
+                  .slice()
+                  .sort(
+                    (a, b) =>
+                      b.post_count - a.post_count ||
+                      b.member_count - a.member_count,
+                  )
+                  .slice(0, 5)
+                  .map((w, i) => (
+                    <button
+                      className="trending-world"
+                      key={w.id}
+                      onClick={() => openWorld(w.id)}
+                    >
+                      <span>{i + 1}</span>
+                      <span className={"world-symbol " + w.icon}>
+                        <WorldIcon name={w.icon} size={17} />
+                      </span>
+                      <div>
+                        <strong>{w.name}</strong>
+                        <small>
+                          {count(w.member_count)} members · {w.post_count} posts
+                        </small>
+                      </div>
+                    </button>
+                  ))}
+                {!boot.worlds.some((w) => w.kind === "public") && (
+                  <p className="widget-empty">
+                    Public Worlds will appear here as people build them.
+                  </p>
+                )}
+              </section>
+              <section className="panel">
+                <div className="section-head">
+                  <h3>Suggested creators</h3>
+                  <button onClick={() => navigate("Explore")}>See all</button>
+                </div>
+                {boot.creators.slice(0, 4).map((p) => (
+                  <div className="suggested-creator" key={p.id}>
+                    <button onClick={() => openProfile(p.id)}>
+                      <Avatar person={p} />
+                      <span>
+                        <strong>{p.display_name}</strong>
+                        <small>{count(p.follower_count)} followers</small>
+                      </span>
+                    </button>
+                    <button
+                      className="primary small"
+                      onClick={() =>
+                        void mutation("follow", { target_id: p.id })
+                      }
+                    >
+                      {p.following ? "Following" : "Follow"}
+                    </button>
+                  </div>
+                ))}
+                {!boot.creators.length && (
+                  <p className="widget-empty">
+                    New creators arrive with every new account. Share your first
+                    post.
+                  </p>
+                )}
+              </section>
+              <section className="panel">
+                <div className="section-head">
+                  <h3>Active communities</h3>
+                  <button onClick={() => navigate("Communities")}>
+                    See all
+                  </button>
+                </div>
+                {boot.communities.slice(0, 4).map((c) => (
+                  <button
+                    className="community-widget"
+                    key={c.id}
+                    onClick={() => openCommunity(c.id)}
+                  >
+                    <span className="world-symbol">
+                      <Users size={17} />
+                    </span>
+                    <div>
+                      <strong>{c.name}</strong>
+                      <small>{count(c.member_count)} members</small>
+                    </div>
+                    <ChevronRight size={13} />
+                  </button>
+                ))}
+                {!boot.communities.length && (
+                  <p className="widget-empty">
+                    A smaller space for your people. Create a community around
+                    an interest.
+                  </p>
+                )}
+              </section>
+              <div className="rightbar-note">
+                <Sparkles size={20} />
+                <p>
+                  Different interests.
+                  <br />
+                  One Common.
+                </p>
+                <button
+                  onClick={() =>
+                    requireAccount(() => {
+                      setEditingWorld(undefined);
+                      setPreset(undefined);
+                      setModal("world");
+                    })
+                  }
+                >
+                  Build your World
+                  <ArrowRight size={14} />
+                </button>
+              </div>
+              <footer>
+                <button onClick={() => setModal("settings")}>
+                  Privacy & settings
+                </button>
+                <span>common. © 2026</span>
+              </footer>
+            </aside>
+          )}
+        </div>
+      </div>
+      <nav className="social-bottom-nav" aria-label="Mobile navigation">
+        {[
+          { name: "Home", icon: Home },
+          { name: "Explore", icon: Compass },
+          { name: "Create", icon: PlusCircle },
+          { name: "Worlds", icon: Globe },
+          { name: "Profile", icon: User },
+        ].map(({ name, icon: Icon }) => (
+          <button
+            key={name}
+            className={page === name ? "active" : ""}
+            onClick={() =>
+              name === "Create"
+                ? createPost()
+                : name === "Profile"
+                  ? session
+                    ? openProfile(session.user.id)
+                    : setModal("auth")
+                  : navigate(name)
+            }
+          >
+            <Icon size={21} />
+            <span>{name}</span>
+          </button>
+        ))}
+      </nav>
+      {notice && (
+        <div className="toast" role="status">
+          <Check size={16} />
+          {notice}
+        </div>
+      )}
+      {modal === "auth" && (
+        <Auth
+          configured={configured}
+          onClose={() => setModal(null)}
+          onSession={account.keepSession}
+        />
+      )}{" "}
+      {(modal === "profile" ||
+        (!onboardingDismissed && profile && !profile.onboarded)) &&
+        session &&
+        profile && (
+          <ProfileEditor
+            profile={profile}
+            session={session}
+            onClose={() => {
+              setModal(null);
+              setOnboardingDismissed(true);
+            }}
+            onSaved={() => {
+              setOnboardingDismissed(true);
+              void account.reloadProfile();
+              void refresh();
+            }}
+          />
+        )}
+      {modal === "post" && session && (
+        <Composer
+          session={session}
+          worlds={boot.worlds}
+          communities={boot.communities}
+          worldId={activeWorld?.kind === "public" ? activeWorld.id : undefined}
+          communityId={communityId || undefined}
+          quotedPostId={quotedPost}
+          initialTopics={activeWorld?.topics}
+          onClose={() => setModal(null)}
+          onCreated={() => {
+            setModal(null);
+            void refresh();
+            alert("Your post is live.");
+          }}
+        />
+      )}
+      {modal === "world" && session && (
+        <WorldEditor
+          session={session}
+          world={editingWorld}
+          preset={preset}
+          onClose={() => setModal(null)}
+          onSaved={(id) => {
+            setModal(null);
+            void loadBoot();
+            openWorld(id);
+            alert("Your World is ready.");
+          }}
+        />
+      )}
+      {modal === "community" && session && (
+        <CommunityEditor
+          session={session}
+          worlds={boot.worlds}
+          onClose={() => setModal(null)}
+          onCreated={(id) => {
+            setModal(null);
+            void loadBoot();
+            openCommunity(id);
+          }}
+        />
+      )}
+      {modal === "customize" && session && creator && (
+        <CreatorSettings
+          session={session}
+          profile={creator}
+          onClose={() => setModal(null)}
+          onSaved={() => void refresh()}
+        />
+      )}{" "}
+      {modal === "settings" && (
+        <SettingsPanel
+          session={session}
+          onClose={() => setModal(null)}
+          onLogout={() =>
+            void account.logout().then(() => {
+              setModal(null);
+              navigate("Home");
+            })
+          }
+          onDeleted={() => location.reload()}
+          onNotice={alert}
+        />
+      )}{" "}
+      {modal === "event" && session && (
+        <CreateMoment
+          session={session}
+          worldId={worldId || undefined}
+          communityId={communityId || undefined}
+          onClose={() => setModal(null)}
+          onCreated={(id) => {
+            setModal(null);
+            setRoom(id);
+            void loadEvents();
+          }}
+        />
+      )}
+      {inviteTarget && session && (
+        <MemberPicker
+          session={session}
+          onClose={() => setInviteTarget(null)}
+          onSelect={async (id) => {
+            await act(
+              inviteTarget.kind === "world" ? "world_role" : "community_role",
+              {
+                [inviteTarget.kind === "world" ? "world_id" : "community_id"]:
+                  inviteTarget.id,
+                target_id: id,
+                role: "member",
+              },
+              session,
+            );
+            await refresh();
+            alert("Invitation saved.");
+          }}
+        />
+      )}
+      {commentPost && (
+        <Comments
+          post={commentPost}
+          session={session}
+          onClose={() => {
+            setCommentPost(null);
+            history.replaceState(null, "", location.pathname);
+          }}
+          onAuth={() => {
+            setCommentPost(null);
+            setModal("auth");
+          }}
+          onChanged={() => void loadFeed()}
+        />
+      )}
+    </div>
+  );
+}

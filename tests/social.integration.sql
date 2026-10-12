@@ -1,0 +1,51 @@
+begin;
+select set_config('common.a',gen_random_uuid()::text,true),set_config('common.b',gen_random_uuid()::text,true),set_config('common.c',gen_random_uuid()::text,true);
+insert into auth.users(id,email,raw_user_meta_data)values(current_setting('common.a')::uuid,'social-a@example.invalid','{"birthdate":"1990-01-01"}'),(current_setting('common.b')::uuid,'social-b@example.invalid','{"birthdate":"1990-01-01"}'),(current_setting('common.c')::uuid,'social-c@example.invalid','{"birthdate":"1990-01-01"}');
+update public.profiles set onboarded=true,interests=array['Gaming']where id in(current_setting('common.a')::uuid,current_setting('common.b')::uuid,current_setting('common.c')::uuid);
+update public.user_settings set messages_from='anyone'where user_id in(current_setting('common.a')::uuid,current_setting('common.b')::uuid,current_setting('common.c')::uuid);
+set local role authenticated;
+select set_config('request.jwt.claim.sub',current_setting('common.a'),true);
+select set_config('common.world1',public.social_action('create_world','{"name":"Gaming Test","description":"Test public world","kind":"public","visibility":"public","category":"Gaming","topics":["Gaming"],"content_mix":{"video":30,"image":25,"text":25,"community":20},"contribution":"anyone"}')->>'id',true);
+select set_config('common.world2',public.social_action('create_world','{"name":"Comedy Test","kind":"public","visibility":"public","category":"Comedy","topics":["Comedy"],"contribution":"approval"}')->>'id',true);
+select set_config('common.personal',public.social_action('create_world','{"name":"My private test","kind":"personal","visibility":"private","category":"Gaming","topics":["Gaming"]}')->>'id',true);
+select set_config('common.community',public.social_action('create_community',jsonb_build_object('name','Test Community','visibility','public','world_ids',jsonb_build_array(current_setting('common.world1'))))->>'id',true);
+select set_config('common.post',public.social_action('create_post',jsonb_build_object('type','text','title','One canonical post','body','Testing one post across two Worlds','topics',jsonb_build_array('Gaming'),'visibility','public','world_ids',jsonb_build_array(current_setting('common.world1'),current_setting('common.world2')),'media','[]'::jsonb))->>'id',true);
+do $$begin
+ if jsonb_array_length(public.social_read('feed',jsonb_build_object('world_id',current_setting('common.personal')))->'items')<>1 then raise exception 'FAIL: personal topic feed';end if;
+ if jsonb_array_length(public.social_read('feed',jsonb_build_object('world_id',current_setting('common.world1')))->'items')<>1 then raise exception 'FAIL: public World feed';end if;
+ perform public.social_action('world_preferences',jsonb_build_object('world_id',current_setting('common.personal'),'sort','newest','small_creators',true,'followed_communities',true));
+ if jsonb_array_length(public.social_read('feed',jsonb_build_object('world_id',current_setting('common.personal')))->'items')<>0 then raise exception 'FAIL: followed-community filter';end if;
+end$$;
+select set_config('request.jwt.claim.sub',current_setting('common.b'),true);
+do $$begin
+ if exists(select 1 from public.worlds where id=current_setting('common.personal')::uuid)then raise exception 'FAIL: private World leaked';end if;
+ if exists(select 1 from public.world_preferences where user_id=current_setting('common.a')::uuid)then raise exception 'FAIL: World preferences leaked';end if;
+ begin perform public.social_action('update_world',jsonb_build_object('world_id',current_setting('common.world1'),'name','Stolen'));raise exception 'FAIL: unauthorized World update';exception when others then if sqlerrm like 'FAIL:%'then raise;end if;end;
+ perform public.social_action('like',jsonb_build_object('post_id',current_setting('common.post')));
+ if (public.social_read('post',jsonb_build_object('post_id',current_setting('common.post')))->>'likes')::integer<>1 then raise exception 'FAIL: like count';end if;
+ perform public.social_action('comment',jsonb_build_object('post_id',current_setting('common.post'),'body','A real comment'));
+ begin perform public.social_action('delete_post',jsonb_build_object('post_id',current_setting('common.post')));raise exception 'FAIL: unauthorized post deletion';exception when others then if sqlerrm like 'FAIL:%'then raise;end if;end;
+ perform public.social_action('save_post',jsonb_build_object('post_id',current_setting('common.post')));
+end$$;
+select set_config('common.pending_post',public.social_action('create_post',jsonb_build_object('type','text','body','Needs moderator approval','topics',jsonb_build_array('Gaming'),'visibility','public','world_ids',jsonb_build_array(current_setting('common.world2'))))->>'id',true);
+select set_config('common.dm',public.social_action('create_conversation',jsonb_build_object('members',jsonb_build_array(current_setting('common.a'))))->>'id',true);
+select public.social_action('send_dm',jsonb_build_object('conversation_id',current_setting('common.dm'),'body','Private test message'));
+select set_config('request.jwt.claim.sub',current_setting('common.c'),true);
+do $$begin
+ if exists(select 1 from public.post_saves where user_id=current_setting('common.b')::uuid)then raise exception 'FAIL: private saves leaked';end if;
+ if exists(select 1 from public.direct_messages where conversation_id=current_setting('common.dm')::uuid)then raise exception 'FAIL: private messages leaked';end if;
+ begin perform public.social_read('conversation',jsonb_build_object('conversation_id',current_setting('common.dm')));raise exception 'FAIL: private conversation RPC leaked';exception when others then if sqlerrm like 'FAIL:%'then raise;end if;end;
+ if jsonb_array_length(public.social_read('feed',jsonb_build_object('world_id',current_setting('common.world2')))->'items')<>1 then raise exception 'FAIL: pending World post exposed';end if;
+end$$;
+select set_config('request.jwt.claim.sub',current_setting('common.a'),true);
+select public.social_action('approve_post',jsonb_build_object('world_id',current_setting('common.world2'),'post_id',current_setting('common.pending_post')));
+do $$begin
+ if jsonb_array_length(public.social_read('feed',jsonb_build_object('world_id',current_setting('common.world2')))->'items')<>2 then raise exception 'FAIL: approved post missing';end if;
+ if(public.social_read('post',jsonb_build_object('post_id',current_setting('common.post')))->>'comments')::integer<>1 then raise exception 'FAIL: canonical comment count';end if;
+ if jsonb_array_length(public.social_read('post',jsonb_build_object('post_id',current_setting('common.post')))->'worlds')<>2 then raise exception 'FAIL: multi-World associations';end if;
+ perform public.social_read('analytics','{"days":30}');
+ perform public.block_user(current_setting('common.b')::uuid);
+ begin perform public.social_action('send_dm',jsonb_build_object('conversation_id',current_setting('common.dm'),'body','Blocked'));raise exception 'FAIL: blocked messaging';exception when others then if sqlerrm like 'FAIL:%'then raise;end if;end;
+end$$;
+rollback;
+select 'Social integration tests passed. All fixtures rolled back.'as result;
